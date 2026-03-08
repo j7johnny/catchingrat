@@ -23,7 +23,7 @@ from .signing import build_signed_page_key
 from .storage import delete_relative_path, ensure_parent, media_relative
 from .watermark import build_watermark_payload, embed_watermark
 
-daily_page_layout_version = "v3"
+daily_page_layout_version = "v5"
 
 
 def _maybe_enqueue(task, *args):
@@ -172,7 +172,13 @@ def build_daily_page(
     relative_path = daily_page_relative_path(chapter_version.id, reader.id, for_date, device_profile, page_index)
     absolute_path = ensure_parent(relative_path)
     payload = build_watermark_payload(reader.reader_id, for_date)
-    embed_watermark(str(base_page.absolute_path), str(absolute_path), payload)
+    embed_watermark(
+        str(base_page.absolute_path),
+        str(absolute_path),
+        payload,
+        expected_reader_id=reader.reader_id,
+        expected_yyyymmdd=for_date.strftime("%Y%m%d"),
+    )
 
     if page and page.relative_path != relative_path:
         delete_relative_path(page.relative_path)

@@ -4,13 +4,23 @@
 <a class="secondary-button" href="{% url 'backoffice:dashboard' %}">回管理首頁</a>
 {% endblock %}
 
+{% block scripts %}
+{% if active_record and active_record.status != "succeeded" and active_record.status != "failed" %}
+<script>
+    window.setTimeout(function () {
+        window.location.reload();
+    }, 2000);
+</script>
+{% endif %}
+{% endblock %}
+
 {% block manage_content %}
 <section class="manage-grid manage-grid--two">
     <form method="post" enctype="multipart/form-data" class="manage-panel">
         {% csrf_token %}
         <div class="section-heading">
             <h3>上傳圖片</h3>
-            <p class="subtle">支援站內原圖、一般截圖與多張切片拼接圖。</p>
+            <p class="subtle">支援站內原圖、一般截圖與多張切片拼接圖。送出後會建立一筆可追蹤的提取紀錄。</p>
         </div>
         {{ form.non_field_errors }}
         {% for field in form %}
@@ -28,31 +38,93 @@
 
     <section class="manage-panel">
         <div class="section-heading">
-            <h3>提取結果</h3>
-            <p class="subtle">若結果有效，會解析出 reader_id 與日期。</p>
+            <h3>最近提取紀錄</h3>
+            <p class="subtle">每次提取都會留下記錄，方便日後回查。</p>
         </div>
-        {% if result %}
-            <dl class="meta-list">
-                <div>
-                    <dt>原始字串</dt>
-                    <dd>{{ result.raw_payload }}</dd>
-                </div>
-                <div>
-                    <dt>是否有效</dt>
-                    <dd>{% if result.is_valid %}有效{% else %}無法驗證{% endif %}</dd>
-                </div>
-                <div>
-                    <dt>閱讀者帳號</dt>
-                    <dd>{% if result.parsed %}{{ result.parsed.reader_id }}{% else %}無{% endif %}</dd>
-                </div>
-                <div>
-                    <dt>日期</dt>
-                    <dd>{% if result.parsed %}{{ result.parsed.yyyymmdd }}{% else %}無{% endif %}</dd>
-                </div>
-            </dl>
-        {% else %}
-            <p class="subtle">尚未上傳圖片。</p>
-        {% endif %}
+        <div class="list-stack">
+            {% for record in recent_records %}
+                <a class="list-row {% if active_record and active_record.id == record.id %}list-row--active{% endif %}" href="{% url 'backoffice:watermark-extract-detail' record.id %}">
+                    <div>
+                        <strong>#{{ record.id }} {{ record.source_filename }}</strong>
+                        <p class="subtle">{{ record.get_status_display }} ・ {{ record.created_at|date:"Y-m-d H:i:s" }}</p>
+                    </div>
+                    <span class="status-pill {% if record.is_valid %}is-success{% endif %}">
+                        {% if record.is_valid %}已解析{% else %}{{ record.get_status_display }}{% endif %}
+                    </span>
+                </a>
+            {% empty %}
+                <p class="subtle">目前還沒有提取紀錄。</p>
+            {% endfor %}
+        </div>
     </section>
 </section>
+
+{% if active_record %}
+<section class="manage-panel">
+    <div class="section-heading">
+        <h3>目前紀錄：#{{ active_record.id }}</h3>
+        <p class="subtle">這裡會顯示提取過程、嘗試順序與最後解析結果。</p>
+    </div>
+    <dl class="meta-list">
+        <div>
+            <dt>原始檔名</dt>
+            <dd>{{ active_record.source_filename }}</dd>
+        </div>
+        <div>
+            <dt>狀態</dt>
+            <dd>{{ active_record.get_status_display }}</dd>
+        </div>
+        <div>
+            <dt>圖片尺寸</dt>
+            <dd>{{ active_record.image_width }} x {{ active_record.image_height }}</dd>
+        </div>
+        <div>
+            <dt>嘗試次數</dt>
+            <dd>{{ active_record.attempt_count }}</dd>
+        </div>
+        <div>
+            <dt>處理時間</dt>
+            <dd>{% if active_record.duration_ms %}{{ active_record.duration_ms }} ms{% else %}處理中{% endif %}</dd>
+        </div>
+        <div>
+            <dt>成功方法</dt>
+            <dd>{{ active_record.selected_method|default:"尚未完成" }}</dd>
+        </div>
+        <div>
+            <dt>原始提取文本</dt>
+            <dd>{{ active_record.raw_payload|default:"尚未完成" }}</dd>
+        </div>
+        <div>
+            <dt>reader_id</dt>
+            <dd>{{ active_record.parsed_reader_id|default:"尚未解析" }}</dd>
+        </div>
+        <div>
+            <dt>日期</dt>
+            <dd>{{ active_record.parsed_yyyymmdd|default:"尚未解析" }}</dd>
+        </div>
+        {% if active_record.error_message %}
+            <div>
+                <dt>錯誤訊息</dt>
+                <dd>{{ active_record.error_message }}</dd>
+            </div>
+        {% endif %}
+    </dl>
+    <div class="process-log">
+        {% for entry in active_record.process_log %}
+            <article class="process-log__entry">
+                <div class="process-log__meta">
+                    <strong>{{ entry.label }}</strong>
+                    {% if entry.duration_ms %}<span>{{ entry.duration_ms }} ms</span>{% endif %}
+                </div>
+                <p>{{ entry.message }}</p>
+                {% if entry.raw_preview %}
+                    <code>{{ entry.raw_preview }}</code>
+                {% endif %}
+            </article>
+        {% empty %}
+            <p class="subtle">尚未開始處理。</p>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
 {% endblock %}

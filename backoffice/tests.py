@@ -3,7 +3,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from accounts.models import User
-from library.models import Chapter, Novel, ReaderChapterGrant, ReaderNovelGrant
+from library.models import Chapter, Novel, ReaderChapterGrant, ReaderNovelGrant, WatermarkExtractionRecord
 from library.services.publishing import build_daily_page, publish_chapter
 from testsupport import build_long_chinese_text, cleanup_temp_media_root, find_font_or_skip, make_temp_media_root
 
@@ -154,11 +154,19 @@ class BackofficeFlowTests(TestCase):
             {
                 "image": SimpleUploadedFile("page.png", page.absolute_path.read_bytes(), content_type="image/png"),
             },
+            follow=False,
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "reader01")
-        self.assertContains(response, today.strftime("%Y%m%d"))
+        record = WatermarkExtractionRecord.objects.latest("id")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], f"/manage/tools/watermark-extract/{record.id}/")
+
+        record.refresh_from_db()
+        self.assertEqual(record.status, WatermarkExtractionRecord.Status.SUCCEEDED)
+        self.assertTrue(record.is_valid)
+        self.assertEqual(record.parsed_reader_id, "reader01")
+        self.assertEqual(record.parsed_yyyymmdd, today.strftime("%Y%m%d"))
+        self.assertGreater(len(record.process_log), 1)
 
     def test_dashboard_shows_version_string(self):
         admin = self.create_admin()

@@ -20,4 +20,9 @@ urlpatterns = [
     path("manage/settings/anti-ocr/new/", views.anti_ocr_preset_create, name="anti-ocr-create"),
     path("manage/settings/anti-ocr/<int:preset_id>/", views.anti_ocr_preset_update, name="anti-ocr-update"),
     path("manage/tools/watermark-extract/", views.watermark_extract, name="watermark-extract"),
+    path(
+        "manage/tools/watermark-extract/<int:record_id>/",
+        views.watermark_extract_detail,
+        name="watermark-extract-detail",
+    ),
 ]

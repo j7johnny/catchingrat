@@ -9,7 +9,12 @@ from PIL import Image
 from accounts.models import User
 from library.models import Chapter, DeviceProfile, Novel
 from library.services.publishing import build_daily_page, cleanup_daily_cache, publish_chapter, render_base_pages_for_version
-from library.services.watermark import extract_watermark
+from library.services.watermark import (
+    build_recovery_context,
+    extract_watermark,
+    extract_watermark_detailed,
+    recover_candidate_payload,
+)
 from testsupport import build_long_chinese_text, cleanup_temp_media_root, find_font_or_skip, make_temp_media_root
 
 TEST_PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
@@ -85,6 +90,45 @@ class RenderingFlowTests(TestCase):
         self.assertEqual(parsed["reader_id"], "reader01")
         self.assertEqual(parsed["yyyymmdd"], today.strftime("%Y%m%d"))
 
+    def test_detailed_extract_prefers_full_image_for_original_page(self):
+        version = publish_chapter(self.chapter, actor=self.admin)
+        today = timezone.localdate()
+        page = build_daily_page(version, self.reader, today, DeviceProfile.DESKTOP, 1)
+
+        upload = SimpleUploadedFile("page.png", page.absolute_path.read_bytes(), content_type="image/png")
+        result = extract_watermark_detailed(upload)
+
+        self.assertTrue(result["is_valid"])
+        self.assertEqual(result["parsed"]["reader_id"], "reader01")
+        self.assertEqual(result["trace"][1]["stage"], "full_image")
+        self.assertNotIn("cropped", {entry["stage"] for entry in result["trace"]})
+
+    def test_recovery_ignores_future_cached_dates_for_near_match(self):
+        version = publish_chapter(self.chapter, actor=self.admin)
+        today = timezone.localdate()
+        tomorrow = today + timedelta(days=1)
+        build_daily_page(version, self.reader, today, DeviceProfile.DESKTOP, 1)
+        build_daily_page(version, self.reader, tomorrow, DeviceProfile.DESKTOP, 1)
+
+        context = build_recovery_context()
+        recovered = recover_candidate_payload(f"Reader01|{today:%Y%m}0(", context)
+
+        self.assertIsNotNone(recovered)
+        self.assertEqual(recovered["reader_id"], "reader01")
+        self.assertEqual(recovered["yyyymmdd"], today.strftime("%Y%m%d"))
+
+    def test_recovery_can_fix_single_reader_prefix_noise(self):
+        version = publish_chapter(self.chapter, actor=self.admin)
+        today = timezone.localdate()
+        build_daily_page(version, self.reader, today, DeviceProfile.DESKTOP, 1)
+
+        context = build_recovery_context()
+        recovered = recover_candidate_payload(f"$eader01|{today:%Y%m%d}~~~~", context)
+
+        self.assertIsNotNone(recovered)
+        self.assertEqual(recovered["reader_id"], "reader01")
+        self.assertEqual(recovered["yyyymmdd"], today.strftime("%Y%m%d"))
+
     def test_stacked_screenshot_like_image_can_still_extract_watermark(self):
         version = publish_chapter(self.chapter, actor=self.admin)
         today = timezone.localdate()
@@ -99,8 +143,9 @@ class RenderingFlowTests(TestCase):
             canvas.save(buffer, format="PNG")
 
         upload = SimpleUploadedFile("stacked.png", buffer.getvalue(), content_type="image/png")
-        _, parsed = extract_watermark(upload)
+        result = extract_watermark_detailed(upload)
 
-        self.assertIsNotNone(parsed)
-        self.assertEqual(parsed["reader_id"], "reader01")
-        self.assertEqual(parsed["yyyymmdd"], today.strftime("%Y%m%d"))
+        self.assertTrue(result["is_valid"])
+        self.assertEqual(result["parsed"]["reader_id"], "reader01")
+        self.assertEqual(result["parsed"]["yyyymmdd"], today.strftime("%Y%m%d"))
+        self.assertIn("cropped", {entry["stage"] for entry in result["trace"]})

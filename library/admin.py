@@ -15,6 +15,7 @@ from .models import (
     ReaderChapterGrant,
     ReaderNovelGrant,
     ReaderSiteGrant,
+    WatermarkExtractionRecord,
 )
 from .services.publishing import publish_chapter
 
@@ -152,3 +153,33 @@ class AuditLogAdmin(admin.ModelAdmin):
     list_display = ("event_type", "user", "ip_address", "created_at")
     list_filter = ("event_type", "created_at")
     readonly_fields = ("details",)
+
+
+@admin.register(WatermarkExtractionRecord)
+class WatermarkExtractionRecordAdmin(admin.ModelAdmin):
+    list_display = (
+        "source_filename",
+        "status",
+        "is_valid",
+        "parsed_reader_id",
+        "parsed_yyyymmdd",
+        "selected_method",
+        "created_at",
+    )
+    list_filter = ("status", "is_valid", "created_at")
+    search_fields = ("source_filename", "raw_payload", "parsed_reader_id", "parsed_yyyymmdd")
+    readonly_fields = (
+        "upload_relative_path",
+        "raw_payload",
+        "parsed_reader_id",
+        "parsed_yyyymmdd",
+        "is_valid",
+        "selected_method",
+        "attempt_count",
+        "duration_ms",
+        "process_log",
+        "error_message",
+        "started_at",
+        "finished_at",
+        "created_at",
+    )

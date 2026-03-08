@@ -307,3 +307,49 @@ class AuditLog(models.Model):
 
     def __str__(self) -> str:
         return f"{self.event_type} @ {self.created_at:%Y-%m-%d %H:%M:%S}"
+
+
+class WatermarkExtractionRecord(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "等待處理"
+        RUNNING = "running", "提取中"
+        SUCCEEDED = "succeeded", "提取成功"
+        FAILED = "failed", "提取失敗"
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="watermark_extraction_records",
+        verbose_name="建立者",
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, verbose_name="狀態")
+    source_filename = models.CharField(max_length=255, verbose_name="原始檔名")
+    upload_relative_path = models.CharField(max_length=255, verbose_name="上傳檔案路徑")
+    image_width = models.PositiveIntegerField(default=0, verbose_name="圖片寬度")
+    image_height = models.PositiveIntegerField(default=0, verbose_name="圖片高度")
+    raw_payload = models.TextField(blank=True, verbose_name="原始提取文本")
+    parsed_reader_id = models.CharField(max_length=16, blank=True, verbose_name="解析後 reader_id")
+    parsed_yyyymmdd = models.CharField(max_length=8, blank=True, verbose_name="解析後日期")
+    is_valid = models.BooleanField(default=False, verbose_name="是否有效")
+    selected_method = models.CharField(max_length=32, blank=True, verbose_name="成功方法")
+    attempt_count = models.PositiveIntegerField(default=0, verbose_name="嘗試次數")
+    duration_ms = models.PositiveIntegerField(default=0, verbose_name="處理時間毫秒")
+    process_log = models.JSONField(default=list, blank=True, verbose_name="處理紀錄")
+    error_message = models.TextField(blank=True, verbose_name="錯誤訊息")
+    started_at = models.DateTimeField(null=True, blank=True, verbose_name="開始時間")
+    finished_at = models.DateTimeField(null=True, blank=True, verbose_name="完成時間")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="建立時間")
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "浮水印提取紀錄"
+        verbose_name_plural = "浮水印提取紀錄"
+
+    @property
+    def absolute_upload_path(self) -> Path:
+        return Path(settings.MEDIA_ROOT) / self.upload_relative_path
+
+    def __str__(self) -> str:
+        return f"{self.source_filename} ({self.get_status_display()})"

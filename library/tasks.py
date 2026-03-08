@@ -9,6 +9,7 @@ from library.services.publishing import (
     cleanup_daily_cache,
     render_base_pages_for_version,
 )
+from library.services.watermark_records import process_extraction_record
 
 
 @shared_task
@@ -40,3 +41,9 @@ def build_daily_pages_task(
 @shared_task
 def cleanup_daily_cache_task() -> int:
     return cleanup_daily_cache()
+
+
+@shared_task
+def run_watermark_extraction_task(record_id: int) -> int:
+    record = process_extraction_record(record_id)
+    return record.id

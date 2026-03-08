@@ -359,6 +359,11 @@ a {
     box-shadow: 0 10px 26px rgba(58, 37, 22, 0.06);
 }
 
+.list-row--active {
+    border-color: var(--accent-soft);
+    box-shadow: 0 12px 30px rgba(138, 61, 33, 0.12);
+}
+
 .status-pill {
     display: inline-flex;
     align-items: center;
@@ -473,6 +478,41 @@ a {
 .meta-list dd {
     margin: 0;
     font-weight: 700;
+}
+
+.process-log {
+    display: grid;
+    gap: 12px;
+    max-height: 520px;
+    overflow: auto;
+    padding-right: 6px;
+}
+
+.process-log__entry {
+    display: grid;
+    gap: 8px;
+    padding: 14px 16px;
+    border-radius: 18px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.78);
+}
+
+.process-log__entry p {
+    margin: 0;
+    line-height: 1.6;
+}
+
+.process-log__entry code {
+    overflow-wrap: anywhere;
+    color: var(--accent);
+}
+
+.process-log__meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
 }
 
 .novel-block {

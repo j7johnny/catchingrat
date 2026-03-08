@@ -12,10 +12,10 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
 from accounts.models import User
-from library.models import AntiOcrPreset, AuditLog, Chapter, ChapterStatus, Novel
-from library.services.audit import log_event
+from library.models import AntiOcrPreset, Chapter, ChapterStatus, Novel, WatermarkExtractionRecord
 from library.services.publishing import publish_chapter
-from library.services.watermark import extract_watermark
+from library.services.watermark_records import create_extraction_record
+from library.tasks import run_watermark_extraction_task
 
 from .forms import (
     AntiOcrPresetSimpleForm,
@@ -369,28 +369,46 @@ def anti_ocr_preset_update(request: HttpRequest, preset_id: int) -> HttpResponse
 @require_http_methods(["GET", "POST"])
 def watermark_extract(request: HttpRequest) -> HttpResponse:
     form = WatermarkExtractToolForm(request.POST or None, request.FILES or None)
-    result = None
     if request.method == "POST" and form.is_valid():
-        raw_payload, parsed = extract_watermark(form.cleaned_data["image"])
-        result = {
-            "raw_payload": raw_payload.replace("\x00", ""),
-            "parsed": parsed,
-            "is_valid": parsed is not None,
-        }
-        log_event(
-            AuditLog.EventType.WATERMARK_EXTRACTED,
-            user=request.user,
-            request=request,
-            details={"result": result, "via": "backoffice"},
-        )
+        record = create_extraction_record(form.cleaned_data["image"], actor=request.user)
+        try:
+            run_watermark_extraction_task.delay(record.id)
+        except Exception:
+            run_watermark_extraction_task(record.id)
+        messages.success(request, f"已建立提取任務 #{record.id}。")
+        return redirect("backoffice:watermark-extract-detail", record_id=record.id)
+
+    recent_records = WatermarkExtractionRecord.objects.select_related("created_by")[:10]
     return render_manage(
         request,
         "backoffice/watermark_extract.html",
         {
             "manage_section": "tools",
             "page_title": "浮水印提取工具",
-            "page_subtitle": "上傳站內原圖、一般截圖或多張切片拼接圖，直接解析 reader_id|yyyymmdd。",
+            "page_subtitle": "先做完整原圖提取，失敗後再自動裁切，整個過程會留下可追蹤紀錄。",
             "form": form,
-            "result": result,
+            "recent_records": recent_records,
+            "active_record": None,
+        },
+    )
+
+
+@admin_required
+def watermark_extract_detail(request: HttpRequest, record_id: int) -> HttpResponse:
+    record = get_object_or_404(WatermarkExtractionRecord.objects.select_related("created_by"), pk=record_id)
+    recent_records = WatermarkExtractionRecord.objects.select_related("created_by")[:10]
+    subtitle = "可查看目前執行進度、每一步處理方式與最後結果。"
+    if record.status in {WatermarkExtractionRecord.Status.PENDING, WatermarkExtractionRecord.Status.RUNNING}:
+        subtitle = "任務正在背景處理中，頁面會自動更新。"
+    return render_manage(
+        request,
+        "backoffice/watermark_extract.html",
+        {
+            "manage_section": "tools",
+            "page_title": f"浮水印提取紀錄 #{record.id}",
+            "page_subtitle": subtitle,
+            "form": WatermarkExtractToolForm(),
+            "recent_records": recent_records,
+            "active_record": record,
         },
     )
