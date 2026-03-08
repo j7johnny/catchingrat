@@ -1,0 +1,67 @@
+{% extends "backoffice/base.html" %}
+
+{% block hero_actions %}
+<a class="secondary-button" href="{% url 'backoffice:novel-list' %}">回小說列表</a>
+{% if chapter %}
+    <a class="secondary-button" href="{% url 'backoffice:novel-detail' chapter.novel_id %}">回到小說頁</a>
+{% endif %}
+{% endblock %}
+
+{% block manage_content %}
+<section class="manage-grid manage-grid--two">
+    <form method="post" class="manage-panel">
+        {% csrf_token %}
+        <div class="section-heading">
+            <h3>{% if chapter %}章節內容{% else %}新增章節{% endif %}</h3>
+            <p class="subtle">儲存草稿只會更新資料；按下立即發布後，讀者端才會看到新圖片。</p>
+        </div>
+        {{ form.non_field_errors }}
+        {% for field in form %}
+            <label class="field">
+                <span>{{ field.label }}</span>
+                {{ field }}
+                {% if field.help_text %}<small class="field-help">{{ field.help_text }}</small>{% endif %}
+                {{ field.errors }}
+            </label>
+        {% endfor %}
+        <div class="form-actions">
+            <button type="submit" name="action" value="save" class="secondary-button">儲存草稿</button>
+            <button type="submit" name="action" value="publish" class="primary-button">立即發布</button>
+        </div>
+    </form>
+
+    <section class="manage-panel">
+        <div class="section-heading">
+            <h3>目前狀態</h3>
+            <p class="subtle">這裡顯示讀者實際看到的是哪個版本。</p>
+        </div>
+        {% if chapter %}
+            <dl class="meta-list">
+                <div>
+                    <dt>所屬小說</dt>
+                    <dd>{{ chapter.novel.title }}</dd>
+                </div>
+                <div>
+                    <dt>章節狀態</dt>
+                    <dd>{{ chapter.get_status_display }}</dd>
+                </div>
+                <div>
+                    <dt>目前發布版本</dt>
+                    <dd>{% if chapter.current_version %}v{{ chapter.current_version.version_number }}{% else %}尚未發布{% endif %}</dd>
+                </div>
+                <div>
+                    <dt>最後發布時間</dt>
+                    <dd>{% if chapter.published_at %}{{ chapter.published_at|date:"Y-m-d H:i" }}{% else %}尚未發布{% endif %}</dd>
+                </div>
+                <div>
+                    <dt>使用參數集</dt>
+                    <dd>{% if chapter.anti_ocr_preset %}{{ chapter.anti_ocr_preset.name }}{% else %}系統預設{% endif %}</dd>
+                </div>
+            </dl>
+        {% else %}
+            <p class="subtle">新增章節後，這裡會顯示發布版本與時間。</p>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}
+

@@ -25,10 +25,12 @@ def set_private_no_store(response):
 
 
 def home(request):
+    if not User.objects.filter(role=User.Role.ADMIN).exists():
+        return redirect("backoffice:setup")
     if not request.user.is_authenticated:
         return redirect("login")
     if request.user.role == User.Role.ADMIN:
-        return redirect("/admin/")
+        return redirect("backoffice:dashboard")
     return redirect("reader:library")
 
 

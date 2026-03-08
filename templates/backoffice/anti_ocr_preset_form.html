@@ -1,0 +1,26 @@
+{% extends "backoffice/base.html" %}
+
+{% block hero_actions %}
+<a class="secondary-button" href="{% url 'backoffice:anti-ocr-list' %}">回參數集列表</a>
+{% endblock %}
+
+{% block manage_content %}
+<form method="post" class="manage-panel">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <div class="manage-grid manage-grid--two">
+        {% for field in form %}
+            <label class="field">
+                <span>{{ field.label }}</span>
+                {{ field }}
+                {% if field.help_text %}<small class="field-help">{{ field.help_text }}</small>{% endif %}
+                {{ field.errors }}
+            </label>
+        {% endfor %}
+    </div>
+    <div class="form-actions">
+        <button type="submit" class="primary-button">儲存參數集</button>
+    </div>
+</form>
+{% endblock %}
+

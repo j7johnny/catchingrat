@@ -1,0 +1,78 @@
+{% extends "backoffice/base.html" %}
+
+{% block hero_actions %}
+<a class="secondary-button" href="{% url 'backoffice:novel-list' %}">回小說列表</a>
+{% if novel %}
+    <a class="primary-button" href="{% url 'backoffice:chapter-create' %}?novel={{ novel.id }}">新增章節</a>
+{% endif %}
+{% endblock %}
+
+{% block manage_content %}
+<section class="manage-grid manage-grid--two">
+    <form method="post" class="manage-panel">
+        {% csrf_token %}
+        <div class="section-heading">
+            <h3>{% if novel %}小說資料{% else %}建立小說{% endif %}</h3>
+            <p class="subtle">管理者使用的基本資料，可隨時修改。</p>
+        </div>
+        {{ form.non_field_errors }}
+        {% for field in form %}
+            <label class="field">
+                <span>{{ field.label }}</span>
+                {{ field }}
+                {% if field.help_text %}<small class="field-help">{{ field.help_text }}</small>{% endif %}
+                {{ field.errors }}
+            </label>
+        {% endfor %}
+        <div class="form-actions">
+            <button type="submit" class="primary-button">{% if novel %}儲存小說資料{% else %}建立小說{% endif %}</button>
+        </div>
+    </form>
+
+    <section class="manage-panel">
+        <div class="section-heading">
+            <h3>章節列表</h3>
+            <p class="subtle">依排序顯示，可直接編輯或重新發布。</p>
+        </div>
+        {% if novel %}
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>排序</th>
+                            <th>章節</th>
+                            <th>狀態</th>
+                            <th>版本</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for chapter in chapters %}
+                            <tr>
+                                <td>{{ chapter.sort_order }}</td>
+                                <td>{{ chapter.title }}</td>
+                                <td>{{ chapter.get_status_display }}</td>
+                                <td>{% if chapter.current_version %}v{{ chapter.current_version.version_number }}{% else %}未發布{% endif %}</td>
+                                <td class="actions-cell">
+                                    <a class="secondary-button" href="{% url 'backoffice:chapter-detail' chapter.id %}">編輯</a>
+                                    <form method="post" action="{% url 'backoffice:chapter-publish' chapter.id %}">
+                                        {% csrf_token %}
+                                        <button type="submit" class="primary-button">重新發布</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="5">目前還沒有章節，請先新增章節。</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p class="subtle">建立小說後，這裡會出現章節列表與快速操作。</p>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}
+

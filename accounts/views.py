@@ -21,9 +21,11 @@ class ReaderLoginView(FormView):
     template_name = "accounts/login.html"
 
     def dispatch(self, request, *args, **kwargs):
+        if not User.objects.filter(role=User.Role.ADMIN).exists():
+            return redirect("backoffice:setup")
         if request.user.is_authenticated:
             if request.user.role == User.Role.ADMIN:
-                return redirect("/admin/")
+                return redirect("backoffice:dashboard")
             return redirect("reader:library")
         return super().dispatch(request, *args, **kwargs)
 
@@ -46,7 +48,7 @@ class ReaderLoginView(FormView):
         clear_login_failures(username, ip_address)
         log_event(AuditLog.EventType.LOGIN_SUCCESS, user=user, request=self.request)
         if user.role == User.Role.ADMIN:
-            return HttpResponseRedirect("/admin/")
+            return HttpResponseRedirect(reverse_lazy("backoffice:dashboard"))
         return redirect("reader:library")
 
 
@@ -54,6 +56,11 @@ class ReaderPasswordChangeView(LoginRequiredMixin, PasswordChangeView):
     form_class = ReaderPasswordChangeForm
     template_name = "accounts/password_change.html"
     success_url = reverse_lazy("reader:library")
+
+    def get_success_url(self):
+        if self.request.user.role == User.Role.ADMIN:
+            return reverse_lazy("backoffice:dashboard")
+        return super().get_success_url()
 
     def form_valid(self, form):
         response = super().form_valid(form)

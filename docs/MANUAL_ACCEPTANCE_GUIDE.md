@@ -13,8 +13,9 @@
 ### 1. 測試網址
 
 - 讀者 / 管理員登入頁：[http://localhost:18080/login](http://localhost:18080/login)
-- 管理後台：[http://localhost:18080/admin/](http://localhost:18080/admin/)
-- 浮水印提取頁：[http://localhost:18080/admin/watermark/extract](http://localhost:18080/admin/watermark/extract)
+- 友善管理後台：[http://localhost:18080/manage/](http://localhost:18080/manage/)
+- 浮水印提取頁：[http://localhost:18080/manage/tools/watermark-extract/](http://localhost:18080/manage/tools/watermark-extract/)
+- 進階 Django admin：[http://localhost:18080/admin/](http://localhost:18080/admin/)
 
 ### 2. 測試帳號
 
@@ -176,27 +177,27 @@ docker compose up -d
 
 - 正確帳號仍然可以正常登入
 
-### 步驟 10：用管理員帳號進入後台
+### 步驟 10：用管理員帳號進入友善後台
 
 建議用另一個瀏覽器，或用無痕視窗操作，避免把讀者登入狀態洗掉。
 
-1. 打開 [http://localhost:18080/admin/](http://localhost:18080/admin/)
+1. 打開 [http://localhost:18080/manage/](http://localhost:18080/manage/)
 2. 使用 `admin / AdminPass123!` 登入
 
 預期結果：
 
-- 可以進入 Django 後台
-- 可以看到 `Users`、`Novels`、`Chapters`、`Reader chapter grants` 等資料管理項目
+- 可以進入友善管理後台
+- 可以看到 `閱讀者管理`、`小說與章節`、`Anti-OCR 設定`、`浮水印工具`
 
 ### 步驟 11：確認既有測試資料存在
 
-1. 進入 `Users`
+1. 進入 `閱讀者管理`
 2. 確認有 `admin` 與 `demo01`
-3. 進入 `Novels`
+3. 進入 `小說與章節`
 4. 確認有 `示範小說`
-5. 進入 `Chapters`
+5. 打開 `示範小說`
 6. 確認有 `第一章 追上來的時間`
-7. 進入 `Reader chapter grants`
+7. 回到 `閱讀者管理`，打開 `demo01`
 8. 確認 `demo01` 已被授權到該章節
 
 預期結果：
@@ -206,17 +207,17 @@ docker compose up -d
 
 ### 步驟 12：測試後台發布章節
 
-1. 在後台進入 `Chapters`
-2. 點開 `第一章 追上來的時間`
-3. 在 `content` 最後面追加一段容易辨識的文字，例如：
+1. 在後台進入 `小說與章節`
+2. 打開 `示範小說`
+3. 點開 `第一章 追上來的時間`
+4. 在 `章節全文` 最後面追加一段容易辨識的文字，例如：
 
 ```text
 【人工驗收標記】這一段文字是用來確認重新發布後，讀者端已經換成新版本。
 ```
 
-4. 先按 `Save`
-5. 回到 `Chapters` 列表頁
-6. 在該章節右側按 `發布`
+5. 先按 `儲存草稿`
+6. 再按 `立即發布`
 
 預期結果：
 
@@ -242,7 +243,7 @@ docker compose up -d
 1. 在讀者章節頁面，對第一張圖片按滑鼠右鍵
 2. 選擇「另存圖片」
 3. 把檔案存到桌面，例如 `page1.png`
-4. 回到管理後台，打開 [http://localhost:18080/admin/watermark/extract](http://localhost:18080/admin/watermark/extract)
+4. 回到管理後台，打開 [http://localhost:18080/manage/tools/watermark-extract/](http://localhost:18080/manage/tools/watermark-extract/)
 5. 上傳剛剛存下來的 `page1.png`
 6. 按送出
 

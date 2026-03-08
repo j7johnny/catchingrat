@@ -235,6 +235,8 @@ def normalize_parsed_candidate(parsed: dict) -> dict:
 
 
 def extract_watermark(uploaded_file) -> tuple[str, dict | None]:
+    if hasattr(uploaded_file, "seek"):
+        uploaded_file.seek(0)
     file_bytes = uploaded_file.read()
     np_buffer = np.frombuffer(file_bytes, dtype=np.uint8)
     image = cv2.imdecode(np_buffer, cv2.IMREAD_COLOR)

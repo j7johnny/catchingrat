@@ -25,14 +25,22 @@
 ## 本機測試網址
 
 - 登入頁：[http://localhost:18080/login](http://localhost:18080/login)
-- 管理後台：[http://localhost:18080/admin/](http://localhost:18080/admin/)
-- 浮水印提取頁：[http://localhost:18080/admin/watermark/extract](http://localhost:18080/admin/watermark/extract)
+- 首次開站設定：[http://localhost:18080/setup/](http://localhost:18080/setup/)
+- 友善管理後台：[http://localhost:18080/manage/](http://localhost:18080/manage/)
+- 進階 Django admin：[http://localhost:18080/admin/](http://localhost:18080/admin/)
+- 浮水印提取頁：[http://localhost:18080/manage/tools/watermark-extract/](http://localhost:18080/manage/tools/watermark-extract/)
 
 ## 管理員快速使用教學
 
 ### 1. 建立第一個管理員
 
-如果是全新站台，先建立管理員帳號：
+如果是全新站台，建議直接打開：
+
+[http://localhost:18080/setup/](http://localhost:18080/setup/)
+
+依畫面建立第一位管理者。建立完成後會自動進入友善後台。
+
+如果你偏好 CLI，也可以手動建立：
 
 PowerShell:
 
@@ -48,47 +56,51 @@ cd /d C:\Users\j7johnny\Desktop\20260307CatchingRat
 docker compose exec web python manage.py createsuperuser
 ```
 
-建立完成後，用這個帳號登入 [管理後台](http://localhost:18080/admin/)。
+CLI 建立完成後，用這個帳號登入 [友善管理後台](http://localhost:18080/manage/)。
 
 ### 2. 新增閱讀者帳號
 
-1. 進入後台的「帳號」。
-2. 點 `新增帳號`。
+1. 進入 [友善管理後台](http://localhost:18080/manage/)。
+2. 點 `閱讀者管理`。
+3. 點 `新增閱讀者`。
 3. 填入：
    - `帳號`：閱讀者登入 ID，限 `A-Z a-z 0-9 _ . -`，最長 16 字
-   - `角色`：選 `閱讀者`
-   - `密碼`
-4. 儲存。
+   - `初始密碼`
+   - `帳號啟用`
+4. 視需要勾選：
+   - `授權全站小說與章節`
+   - `授權指定小說`
+   - `授權指定章節`
+5. 儲存。
 
 這個帳號就是讀者登入用的帳號，也會被寫入隱藏浮水印。
 
 ### 3. 建立小說
 
-1. 進入後台的「小說」。
+1. 進入 `小說與章節`。
 2. 點 `新增小說`。
 3. 填入：
-   - `書名`
-   - `代稱`
+   - `小說名稱`
+   - `小說代稱`
    - `簡介`
-   - `啟用`
+   - `小說啟用`
 4. 儲存。
 
 ### 4. 建立章節
 
-1. 進入後台的「章節」。
-2. 點 `新增章節`。
+1. 進入某本小說的管理頁，或直接點 `新增章節`。
 3. 選擇所屬小說。
 4. 填入：
    - `章節標題`
    - `章節代稱`
-   - `排序`
+   - `章節排序`
    - `章節全文`
 5. 如有需要，可指定 `Anti-OCR 參數集`。
-6. 先儲存章節。
+6. 可先按 `儲存草稿`。
 
 ### 5. 發布章節
 
-章節儲存後，回到章節列表或章節編輯頁，使用 `發布` 功能。
+章節儲存後，在章節編輯頁按 `立即發布`，或在小說頁章節列表按 `重新發布`。
 
 發布後系統會：
 
@@ -108,13 +120,13 @@ docker compose exec web python manage.py createsuperuser
 
 設定方式：
 
-1. 進入後台的「帳號」。
+1. 進入 `閱讀者管理`。
 2. 打開某個閱讀者帳號。
-3. 在頁面下方的授權區塊中，新增：
-   - `閱讀者全站授權`
-   - `閱讀者小說授權`
-   - `閱讀者章節授權`
-4. 儲存。
+3. 在同一頁的授權區塊中勾選：
+   - `授權全站小說與章節`
+   - `授權指定小說`
+   - `授權指定章節`
+4. 儲存閱讀者設定。
 
 ### 7. 讀者開始閱讀
 
@@ -127,7 +139,7 @@ docker compose exec web python manage.py createsuperuser
 
 如果取得疑似外流圖片：
 
-1. 到 [浮水印提取頁](http://localhost:18080/admin/watermark/extract)
+1. 到 [浮水印提取頁](http://localhost:18080/manage/tools/watermark-extract/)
 2. 上傳圖片
 3. 系統會嘗試提取 `reader_id|yyyymmdd`
 

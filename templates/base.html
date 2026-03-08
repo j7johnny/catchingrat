@@ -25,8 +25,10 @@
                         <a href="{% url 'reader:library' %}">我的書庫</a>
                         <a href="{% url 'password-change' %}">修改密碼</a>
                     {% else %}
-                        <a href="/admin/">管理後台</a>
-                        <a href="{% url 'admin-watermark-extract' %}">浮水印提取</a>
+                        <a href="{% url 'backoffice:dashboard' %}">管理首頁</a>
+                        <a href="{% url 'backoffice:watermark-extract' %}">浮水印提取</a>
+                        <a href="{% url 'password-change' %}">修改密碼</a>
+                        <a href="/admin/">進階後台</a>
                     {% endif %}
                     <a href="{% url 'logout' %}">登出</a>
                 </nav>
@@ -42,6 +44,10 @@
         <main class="content-card {% block main_class %}{% endblock %}">
             {% block content %}{% endblock %}
         </main>
+        <footer class="site-footer">
+            <span>版本 {{ app_version }}</span>
+            <span>介面語系：繁體中文</span>
+        </footer>
     </div>
     <script>
         (function () {

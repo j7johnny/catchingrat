@@ -9,6 +9,7 @@ from reader import views as reader_views
 urlpatterns = [
     path("", reader_views.home, name="home"),
     path("", include("accounts.urls")),
+    path("", include("backoffice.urls")),
     path("reader/", include("reader.urls")),
     path("admin/chapters/<int:pk>/publish", library_views.publish_chapter_view, name="admin-chapter-publish"),
     path("admin/watermark/extract", library_views.watermark_extract_view, name="admin-watermark-extract"),

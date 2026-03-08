@@ -58,11 +58,13 @@
 
 {% block branding %}
 <div id="site-name">
-    <a href="{% url 'admin:index' %}">CatchingRat 管理後台</a>
+    <a href="{% url 'backoffice:dashboard' %}">CatchingRat 管理後台</a>
+    <span style="display: inline-block; margin-left: 10px; font-size: 12px; opacity: 0.85;">{{ app_version }}</span>
 </div>
 {% endblock %}
 
 {% block nav-global %}
+<a href="{% url 'backoffice:dashboard' %}" style="color: var(--header-link-color); margin-right: 12px;">友善後台</a>
 <a href="{% url 'admin-watermark-extract' %}" style="color: var(--header-link-color); margin-right: 12px;">浮水印提取</a>
 <a href="/" style="color: var(--header-link-color);">回到前台</a>
 {% endblock %}

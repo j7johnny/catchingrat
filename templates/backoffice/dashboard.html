@@ -1,0 +1,68 @@
+{% extends "backoffice/base.html" %}
+
+{% block hero_actions %}
+<a class="primary-button" href="{% url 'backoffice:reader-create' %}">新增閱讀者</a>
+<a class="secondary-button" href="{% url 'backoffice:novel-create' %}">新增小說</a>
+<a class="secondary-button" href="{% url 'backoffice:watermark-extract' %}">提取浮水印</a>
+{% endblock %}
+
+{% block manage_content %}
+<section class="stat-grid">
+    {% for stat in stats %}
+        <article class="stat-card">
+            <p class="stat-card__label">{{ stat.label }}</p>
+            <p class="stat-card__value">{{ stat.value }}</p>
+        </article>
+    {% endfor %}
+</section>
+
+<section class="manage-grid">
+    <article class="manage-panel">
+        <div class="section-heading">
+            <h3>常用工作</h3>
+            <p class="subtle">依照實際管理流程排列，降低學習成本。</p>
+        </div>
+        <div class="action-grid">
+            <a class="action-card" href="{% url 'backoffice:reader-create' %}">
+                <strong>我要新增閱讀者</strong>
+                <span>建立帳號、設定密碼，並決定授權全站、小說或章節。</span>
+            </a>
+            <a class="action-card" href="{% url 'backoffice:novel-create' %}">
+                <strong>我要建立小說</strong>
+                <span>先建立小說，再從小說頁新增章節與安排排序。</span>
+            </a>
+            <a class="action-card" href="{% url 'backoffice:chapter-create' %}">
+                <strong>我要新增章節</strong>
+                <span>直接貼上全文，先存草稿，確認後再立即發布。</span>
+            </a>
+            <a class="action-card" href="{% url 'backoffice:anti-ocr-list' %}">
+                <strong>我要調整 Anti-OCR</strong>
+                <span>用較容易理解的欄位說明，調整桌機與手機版閱讀效果。</span>
+            </a>
+        </div>
+    </article>
+
+    <article class="manage-panel">
+        <div class="section-heading">
+            <h3>最近更新章節</h3>
+            <p class="subtle">可直接跳到章節編輯頁，繼續修改或重新發布。</p>
+        </div>
+        <div class="list-stack">
+            {% for chapter in recent_chapters %}
+                <a class="list-row" href="{% url 'backoffice:chapter-detail' chapter.id %}">
+                    <div>
+                        <strong>{{ chapter.title }}</strong>
+                        <p class="subtle">{{ chapter.novel.title }}</p>
+                    </div>
+                    <span class="status-pill {% if chapter.status == 'published' %}is-success{% endif %}">
+                        {{ chapter.get_status_display }}
+                    </span>
+                </a>
+            {% empty %}
+                <p class="subtle">目前尚無章節資料。</p>
+            {% endfor %}
+        </div>
+    </article>
+</section>
+{% endblock %}
+

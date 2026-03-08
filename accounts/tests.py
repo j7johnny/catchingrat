@@ -10,6 +10,7 @@ TEST_PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 class AuthFlowTests(TestCase):
     def setUp(self):
         cache.clear()
+        User.objects.create_superuser(username="admin01", password="adminpass")
         self.reader = User.objects.create_user(username="reader01", password="secret123")
 
     def test_bruteforce_lock_after_repeated_failures(self):

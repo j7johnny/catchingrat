@@ -1,0 +1,58 @@
+{% extends "backoffice/base.html" %}
+
+{% block hero_actions %}
+<a class="secondary-button" href="{% url 'backoffice:dashboard' %}">回管理首頁</a>
+{% endblock %}
+
+{% block manage_content %}
+<section class="manage-grid manage-grid--two">
+    <form method="post" enctype="multipart/form-data" class="manage-panel">
+        {% csrf_token %}
+        <div class="section-heading">
+            <h3>上傳圖片</h3>
+            <p class="subtle">支援站內原圖、一般截圖與多張切片拼接圖。</p>
+        </div>
+        {{ form.non_field_errors }}
+        {% for field in form %}
+            <label class="field">
+                <span>{{ field.label }}</span>
+                {{ field }}
+                {% if field.help_text %}<small class="field-help">{{ field.help_text }}</small>{% endif %}
+                {{ field.errors }}
+            </label>
+        {% endfor %}
+        <div class="form-actions">
+            <button type="submit" class="primary-button">開始提取</button>
+        </div>
+    </form>
+
+    <section class="manage-panel">
+        <div class="section-heading">
+            <h3>提取結果</h3>
+            <p class="subtle">若結果有效，會解析出 reader_id 與日期。</p>
+        </div>
+        {% if result %}
+            <dl class="meta-list">
+                <div>
+                    <dt>原始字串</dt>
+                    <dd>{{ result.raw_payload }}</dd>
+                </div>
+                <div>
+                    <dt>是否有效</dt>
+                    <dd>{% if result.is_valid %}有效{% else %}無法驗證{% endif %}</dd>
+                </div>
+                <div>
+                    <dt>閱讀者帳號</dt>
+                    <dd>{% if result.parsed %}{{ result.parsed.reader_id }}{% else %}無{% endif %}</dd>
+                </div>
+                <div>
+                    <dt>日期</dt>
+                    <dd>{% if result.parsed %}{{ result.parsed.yyyymmdd }}{% else %}無{% endif %}</dd>
+                </div>
+            </dl>
+        {% else %}
+            <p class="subtle">尚未上傳圖片。</p>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}

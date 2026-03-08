@@ -48,7 +48,7 @@ def purge_old_assets_for_chapter(chapter: Chapter, keep_version_id: int) -> None
 @transaction.atomic
 def publish_chapter(chapter: Chapter, actor: User | None = None, request=None) -> ChapterVersion:
     if not chapter.content.strip():
-        raise ValueError("Chapter content cannot be empty.")
+        raise ValueError("章節內容不可為空，請先貼上全文再發布。")
     preset = chapter.anti_ocr_preset or get_default_preset()
     latest_version = chapter.versions.aggregate(max_version=Max("version_number"))["max_version"] or 0
     version = ChapterVersion.objects.create(

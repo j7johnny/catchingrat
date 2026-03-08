@@ -1,0 +1,29 @@
+{% extends "backoffice/base.html" %}
+
+{% block hero_actions %}
+<a class="primary-button" href="{% url 'backoffice:reader-create' %}">新增閱讀者</a>
+{% endblock %}
+
+{% block manage_content %}
+<section class="list-stack">
+    {% for reader in readers %}
+        <article class="list-row list-row--card">
+            <div>
+                <strong>{{ reader.username }}</strong>
+                <p class="subtle">
+                    {% if reader.is_active %}啟用中{% else %}已停用{% endif %}
+                    ・ 全站授權 {{ reader.site_grant_count }}
+                    ・ 小說授權 {{ reader.novel_grant_count }}
+                    ・ 章節授權 {{ reader.chapter_grant_count }}
+                </p>
+            </div>
+            <a class="secondary-button" href="{% url 'backoffice:reader-update' reader.id %}">編輯</a>
+        </article>
+    {% empty %}
+        <article class="manage-panel">
+            <p class="subtle">目前尚未建立閱讀者帳號。</p>
+        </article>
+    {% endfor %}
+</section>
+{% endblock %}
+

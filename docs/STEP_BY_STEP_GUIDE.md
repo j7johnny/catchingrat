@@ -101,7 +101,13 @@ docker compose up -d --build
 
 ### 1-6. 建立第一個管理員帳號
 
-開另一個終端視窗。
+建議直接打開瀏覽器：
+
+[http://localhost:18080/setup/](http://localhost:18080/setup/)
+
+依畫面建立第一位管理者即可。建立完成後，系統會自動進入友善管理後台 `/manage/`。
+
+如果你偏好用終端機建立，也可以另外開一個視窗執行：
 
 PowerShell:
 
@@ -117,19 +123,15 @@ cd /d C:\Users\你的帳號\Desktop\20260307CatchingRat
 docker compose exec web python manage.py createsuperuser
 ```
 
-然後依畫面輸入：
-
-- Username：例如 `admin01`
-- Password：請自己設定
-
 ### 1-7. 打開網站
 
 在瀏覽器打開：
 
 - 網站首頁：`http://localhost`
 - Django 直連：`http://localhost:8000`
-- 管理後台：`http://localhost/admin/`
-- 浮水印提取頁：`http://localhost/admin/watermark/extract`
+- 友善管理後台：`http://localhost:18080/manage/`
+- 進階 Django admin：`http://localhost:18080/admin/`
+- 浮水印提取頁：`http://localhost:18080/manage/tools/watermark-extract/`
 
 ---
 
@@ -139,21 +141,19 @@ docker compose exec web python manage.py createsuperuser
 
 打開：
 
-`http://localhost/admin/`
+`http://localhost:18080/manage/`
 
 輸入剛剛建立的管理員帳號。
 
 ### 2-2. 建立一個閱讀者帳號
 
-在後台進入 `Users`
+在友善後台進入 `閱讀者管理`
 
-新增一個使用者，建議：
+新增一個閱讀者，建議：
 
-- username：`reader01`
-- role：`reader`
-- is_active：打勾
-
-儲存後，再用「變更密碼」功能設定密碼。
+- 帳號：`reader01`
+- 初始密碼：自行設定
+- 帳號啟用：打勾
 
 注意：
 
@@ -163,7 +163,7 @@ docker compose exec web python manage.py createsuperuser
 
 ### 2-3. 建立小說
 
-在後台進入 `Novels`
+在友善後台進入 `小說與章節`
 
 新增：
 
@@ -172,7 +172,7 @@ docker compose exec web python manage.py createsuperuser
 
 ### 2-4. 建立章節
 
-在後台進入 `Chapters`
+在友善後台進入小說頁後點 `新增章節`
 
 新增：
 
@@ -182,11 +182,11 @@ docker compose exec web python manage.py createsuperuser
 - sort_order：例如 `1`
 - content：把小說正文貼進去
 
-先按儲存。
+可先按 `儲存草稿`。
 
 ### 2-5. 發布章節
 
-儲存後回到章節列表，按 `發布`
+儲存後在章節頁按 `立即發布`
 
 系統會：
 
@@ -196,12 +196,12 @@ docker compose exec web python manage.py createsuperuser
 
 ### 2-6. 授權這個章節給閱讀者
 
-在後台進入 `Reader chapter grants`
+回到 `閱讀者管理`
 
-新增一筆：
+打開 `reader01` 後，於授權區塊勾選：
 
-- reader：選 `reader01`
-- chapter：選剛才那一章
+- `授權指定章節`
+- 勾選剛才那一章
 
 ### 2-7. 用閱讀者登入測試
 
@@ -224,7 +224,7 @@ docker compose exec web python manage.py createsuperuser
 2. 把第一張圖片另存或截圖
 3. 用管理員打開：
 
-   `http://localhost/admin/watermark/extract`
+   `http://localhost:18080/manage/tools/watermark-extract/`
 
 4. 上傳圖片
 5. 應可看到 `reader_id|yyyymmdd` 對應結果
@@ -577,10 +577,15 @@ docker compose logs -f
 
 ## 12. 建立雲端管理員
 
-```bash
-cd ~/catchingrat
-docker compose exec web python manage.py createsuperuser
-```
+先打開：
+
+`http://你的主機IP/setup/`
+
+或：
+
+`http://你的網域/setup/`
+
+依畫面建立第一位管理者即可。
 
 ---
 
