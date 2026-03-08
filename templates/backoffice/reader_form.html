@@ -7,10 +7,11 @@
 {% block manage_content %}
 <form method="post" class="manage-grid manage-grid--two">
     {% csrf_token %}
+
     <section class="manage-panel">
         <div class="section-heading">
-            <h3>帳號資料</h3>
-            <p class="subtle">建立帳號、啟用或停用，必要時可直接重設密碼。</p>
+            <h3>帳號資訊</h3>
+            <p class="subtle">閱讀者不需要自行註冊，這裡由管理者直接建立與維護。</p>
         </div>
         {{ account_form.non_field_errors }}
         {% for field in account_form %}
@@ -25,8 +26,8 @@
 
     <section class="manage-panel">
         <div class="section-heading">
-            <h3>閱讀授權</h3>
-            <p class="subtle">可同時設定全站、指定小說與指定章節三種授權方式。</p>
+            <h3>授權設定</h3>
+            <p class="subtle">可混合使用全站、指定小說與指定章節授權。</p>
         </div>
         {{ access_form.non_field_errors }}
         <div class="grant-block">
@@ -58,4 +59,3 @@
     </div>
 </form>
 {% endblock %}
-

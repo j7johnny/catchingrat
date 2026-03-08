@@ -3,6 +3,7 @@
 {% block hero_actions %}
 <a class="primary-button" href="{% url 'backoffice:reader-create' %}">新增閱讀者</a>
 <a class="secondary-button" href="{% url 'backoffice:novel-create' %}">新增小說</a>
+<a class="secondary-button" href="{% url 'backoffice:anti7ocr-diagnostics' %}">OCR 診斷</a>
 <a class="secondary-button" href="{% url 'backoffice:watermark-extract' %}">提取浮水印</a>
 {% endblock %}
 
@@ -19,25 +20,33 @@
 <section class="manage-grid">
     <article class="manage-panel">
         <div class="section-heading">
-            <h3>常用工作</h3>
-            <p class="subtle">依照實際管理流程排列，降低學習成本。</p>
+            <h3>建議操作順序</h3>
+            <p class="subtle">第一次開站或清空資料後，建議依照這個順序建立內容。</p>
         </div>
         <div class="action-grid">
             <a class="action-card" href="{% url 'backoffice:reader-create' %}">
-                <strong>我要新增閱讀者</strong>
-                <span>建立帳號、設定密碼，並決定授權全站、小說或章節。</span>
+                <strong>1. 新增閱讀者</strong>
+                <span>先建立帳號，再決定授權範圍與初始密碼。</span>
             </a>
             <a class="action-card" href="{% url 'backoffice:novel-create' %}">
-                <strong>我要建立小說</strong>
-                <span>先建立小說，再從小說頁新增章節與安排排序。</span>
+                <strong>2. 新增小說</strong>
+                <span>建立小說基本資料，之後章節會歸屬在小說底下。</span>
             </a>
             <a class="action-card" href="{% url 'backoffice:chapter-create' %}">
-                <strong>我要新增章節</strong>
-                <span>直接貼上全文，先存草稿，確認後再立即發布。</span>
+                <strong>3. 撰寫章節</strong>
+                <span>先存草稿，再選 anti7ocr 設定與發布。</span>
             </a>
             <a class="action-card" href="{% url 'backoffice:anti-ocr-list' %}">
-                <strong>我要調整 Anti-OCR</strong>
-                <span>用較容易理解的欄位說明，調整桌機與手機版閱讀效果。</span>
+                <strong>4. 調整 anti7ocr</strong>
+                <span>先用示範圖片確認閱讀感，再套用到正式章節。</span>
+            </a>
+            <a class="action-card" href="{% url 'backoffice:anti7ocr-diagnostics' %}">
+                <strong>5. 跑 OCR 診斷</strong>
+                <span>用 Tesseract 看目前設定的辨識難度與 CER。</span>
+            </a>
+            <a class="action-card" href="{% url 'backoffice:watermark-extract' %}">
+                <strong>6. 驗證浮水印</strong>
+                <span>上傳原圖或截圖，確認提取流程是否穩定。</span>
             </a>
         </div>
     </article>
@@ -45,7 +54,7 @@
     <article class="manage-panel">
         <div class="section-heading">
             <h3>最近更新章節</h3>
-            <p class="subtle">可直接跳到章節編輯頁，繼續修改或重新發布。</p>
+            <p class="subtle">可從這裡快速回到最近處理過的章節。</p>
         </div>
         <div class="list-stack">
             {% for chapter in recent_chapters %}
@@ -59,10 +68,9 @@
                     </span>
                 </a>
             {% empty %}
-                <p class="subtle">目前尚無章節資料。</p>
+                <p class="subtle">目前還沒有任何章節。</p>
             {% endfor %}
         </div>
     </article>
 </section>
 {% endblock %}
-

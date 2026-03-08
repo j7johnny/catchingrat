@@ -19,8 +19,8 @@
     <form method="post" enctype="multipart/form-data" class="manage-panel">
         {% csrf_token %}
         <div class="section-heading">
-            <h3>上傳圖片</h3>
-            <p class="subtle">支援站內原圖、一般截圖與多張切片拼接圖。送出後會建立一筆可追蹤的提取紀錄。</p>
+            <h3>上傳待提取圖片</h3>
+            <p class="subtle">會先嘗試全圖提取；若失敗，再改用多組區塊裁切與長截圖視窗抽樣。</p>
         </div>
         {{ form.non_field_errors }}
         {% for field in form %}
@@ -38,18 +38,18 @@
 
     <section class="manage-panel">
         <div class="section-heading">
-            <h3>最近提取紀錄</h3>
-            <p class="subtle">每次提取都會留下記錄，方便日後回查。</p>
+            <h3>最近任務</h3>
+            <p class="subtle">可點進去查看每一步提取過程與採用方法。</p>
         </div>
         <div class="list-stack">
             {% for record in recent_records %}
                 <a class="list-row {% if active_record and active_record.id == record.id %}list-row--active{% endif %}" href="{% url 'backoffice:watermark-extract-detail' record.id %}">
                     <div>
                         <strong>#{{ record.id }} {{ record.source_filename }}</strong>
-                        <p class="subtle">{{ record.get_status_display }} ・ {{ record.created_at|date:"Y-m-d H:i:s" }}</p>
+                        <p class="subtle">{{ record.get_status_display }} / {{ record.created_at|date:"Y-m-d H:i:s" }}</p>
                     </div>
                     <span class="status-pill {% if record.is_valid %}is-success{% endif %}">
-                        {% if record.is_valid %}已解析{% else %}{{ record.get_status_display }}{% endif %}
+                        {% if record.is_valid %}成功{% else %}{{ record.get_status_display }}{% endif %}
                     </span>
                 </a>
             {% empty %}
@@ -62,12 +62,12 @@
 {% if active_record %}
 <section class="manage-panel">
     <div class="section-heading">
-        <h3>目前紀錄：#{{ active_record.id }}</h3>
-        <p class="subtle">這裡會顯示提取過程、嘗試順序與最後解析結果。</p>
+        <h3>提取紀錄 #{{ active_record.id }}</h3>
+        <p class="subtle">會顯示圖片資訊、採用方法、解析結果與處理過程。</p>
     </div>
     <dl class="meta-list">
         <div>
-            <dt>原始檔名</dt>
+            <dt>來源檔名</dt>
             <dd>{{ active_record.source_filename }}</dd>
         </div>
         <div>
@@ -83,16 +83,16 @@
             <dd>{{ active_record.attempt_count }}</dd>
         </div>
         <div>
-            <dt>處理時間</dt>
-            <dd>{% if active_record.duration_ms %}{{ active_record.duration_ms }} ms{% else %}處理中{% endif %}</dd>
+            <dt>耗時</dt>
+            <dd>{% if active_record.duration_ms %}{{ active_record.duration_ms }} ms{% else %}執行中{% endif %}</dd>
         </div>
         <div>
-            <dt>成功方法</dt>
+            <dt>採用方法</dt>
             <dd>{{ active_record.selected_method|default:"尚未完成" }}</dd>
         </div>
         <div>
-            <dt>原始提取文本</dt>
-            <dd>{{ active_record.raw_payload|default:"尚未完成" }}</dd>
+            <dt>原始輸出</dt>
+            <dd>{{ active_record.raw_payload|default:"尚未取得" }}</dd>
         </div>
         <div>
             <dt>reader_id</dt>
@@ -122,7 +122,7 @@
                 {% endif %}
             </article>
         {% empty %}
-            <p class="subtle">尚未開始處理。</p>
+            <p class="subtle">目前還沒有處理紀錄。</p>
         {% endfor %}
     </div>
 </section>

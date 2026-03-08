@@ -23,11 +23,13 @@ from .signing import build_signed_page_key
 from .storage import delete_relative_path, ensure_parent, media_relative
 from .watermark import build_watermark_payload, embed_watermark
 
-daily_page_layout_version = "v5"
+daily_page_layout_version = "v6"
 
 
-def _maybe_enqueue(task, *args):
+def _maybe_enqueue(task, *args, eager_mode: str = "skip"):
     if settings.CELERY_TASK_ALWAYS_EAGER:
+        if eager_mode == "sync":
+            task(*args)
         return
     with contextlib.suppress(Exception):
         task.delay(*args)
@@ -45,10 +47,10 @@ def purge_old_assets_for_chapter(chapter: Chapter, keep_version_id: int) -> None
     delete_queryset_files(DailyPageCache.objects.filter(chapter_version__in=old_versions))
 
 
-@transaction.atomic
 def publish_chapter(chapter: Chapter, actor: User | None = None, request=None) -> ChapterVersion:
     if not chapter.content.strip():
-        raise ValueError("章節內容不可為空，請先貼上全文再發布。")
+        raise ValueError("章節全文不可為空，請先貼入內容再發布。")
+
     preset = chapter.anti_ocr_preset or get_default_preset()
     latest_version = chapter.versions.aggregate(max_version=Max("version_number"))["max_version"] or 0
     version = ChapterVersion.objects.create(
@@ -60,16 +62,23 @@ def publish_chapter(chapter: Chapter, actor: User | None = None, request=None) -
         created_by=actor,
         published_at=timezone.now(),
     )
-    chapter.current_version = version
-    chapter.status = ChapterStatus.PUBLISHED
-    chapter.published_at = timezone.now()
-    chapter.save(update_fields=["current_version", "status", "published_at", "updated_at"])
-    purge_old_assets_for_chapter(chapter, version.id)
 
-    from library.tasks import render_base_pages_task
+    try:
+        render_base_pages_for_version(version, DeviceProfile.DESKTOP, force=True)
+        render_base_pages_for_version(version, DeviceProfile.MOBILE, force=True)
+    except Exception:
+        delete_queryset_files(BasePage.objects.filter(chapter_version=version))
+        version.delete()
+        raise
 
-    _maybe_enqueue(render_base_pages_task, version.id, DeviceProfile.DESKTOP)
-    _maybe_enqueue(render_base_pages_task, version.id, DeviceProfile.MOBILE)
+    with transaction.atomic():
+        chapter.refresh_from_db()
+        chapter.current_version = version
+        chapter.status = ChapterStatus.PUBLISHED
+        chapter.published_at = timezone.now()
+        chapter.save(update_fields=["current_version", "status", "published_at", "updated_at"])
+        purge_old_assets_for_chapter(chapter, version.id)
+
     log_event(
         "chapter_published",
         user=actor,
@@ -81,9 +90,7 @@ def publish_chapter(chapter: Chapter, actor: User | None = None, request=None) -
 
 def render_base_pages_for_version(chapter_version: ChapterVersion, device_profile: str, force: bool = False) -> list[BasePage]:
     if force:
-        delete_queryset_files(
-            BasePage.objects.filter(chapter_version=chapter_version, device_profile=device_profile)
-        )
+        delete_queryset_files(BasePage.objects.filter(chapter_version=chapter_version, device_profile=device_profile))
 
     rendered_pages = render_chapter_page_images(
         chapter_version.content,
@@ -111,10 +118,7 @@ def render_base_pages_for_version(chapter_version: ChapterVersion, device_profil
 
 def ensure_base_pages(chapter_version: ChapterVersion, device_profile: str) -> list[BasePage]:
     pages = list(
-        BasePage.objects.filter(
-            chapter_version=chapter_version,
-            device_profile=device_profile,
-        ).order_by("page_index")
+        BasePage.objects.filter(chapter_version=chapter_version, device_profile=device_profile).order_by("page_index")
     )
     if base_pages_need_regeneration(pages, device_profile, chapter_version.preset_snapshot):
         return render_base_pages_for_version(chapter_version, device_profile, force=True)
@@ -214,6 +218,7 @@ def ensure_daily_bundle(
             for_date.isoformat(),
             device_profile,
             2,
+            eager_mode="skip",
         )
 
     return {

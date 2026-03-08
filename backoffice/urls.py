@@ -19,6 +19,10 @@ urlpatterns = [
     path("manage/settings/anti-ocr/", views.anti_ocr_preset_list, name="anti-ocr-list"),
     path("manage/settings/anti-ocr/new/", views.anti_ocr_preset_create, name="anti-ocr-create"),
     path("manage/settings/anti-ocr/<int:preset_id>/", views.anti_ocr_preset_update, name="anti-ocr-update"),
+    path("manage/settings/anti-ocr/fonts/", views.font_library, name="font-library"),
+    path("manage/settings/anti-ocr/fonts/<int:font_id>/toggle/", views.font_toggle, name="font-toggle"),
+    path("manage/settings/anti-ocr/fonts/<int:font_id>/delete/", views.font_delete, name="font-delete"),
+    path("manage/tools/anti7ocr-diagnostics/", views.anti7ocr_diagnostics, name="anti7ocr-diagnostics"),
     path("manage/tools/watermark-extract/", views.watermark_extract, name="watermark-extract"),
     path(
         "manage/tools/watermark-extract/<int:record_id>/",

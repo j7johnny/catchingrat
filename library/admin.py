@@ -1,15 +1,18 @@
+from __future__ import annotations
+
 from django.contrib import admin
 from django.db.models import QuerySet
 from django.urls import reverse
 from django.utils.html import format_html
 
-from .forms import AntiOcrPresetAdminForm, ChapterAdminForm, NovelAdminForm
-from .models import (
+from library.forms import AntiOcrPresetAdminForm, ChapterAdminForm, NovelAdminForm
+from library.models import (
     AntiOcrPreset,
     AuditLog,
     BasePage,
     Chapter,
     ChapterVersion,
+    CustomFontUpload,
     DailyPageCache,
     Novel,
     ReaderChapterGrant,
@@ -17,11 +20,12 @@ from .models import (
     ReaderSiteGrant,
     WatermarkExtractionRecord,
 )
-from .services.publishing import publish_chapter
+from library.services.anti7ocr_config import summarize_preset
+from library.services.publishing import publish_chapter
 
 admin.site.site_header = "CatchingRat 管理後台"
-admin.site.site_title = "CatchingRat 後台"
-admin.site.index_title = "內容管理與授權工具"
+admin.site.site_title = "CatchingRat 管理後台"
+admin.site.index_title = "Django admin 備援入口"
 
 
 @admin.register(Novel)
@@ -35,41 +39,36 @@ class NovelAdmin(admin.ModelAdmin):
 @admin.register(AntiOcrPreset)
 class AntiOcrPresetAdmin(admin.ModelAdmin):
     form = AntiOcrPresetAdminForm
-    list_display = ("name", "is_default", "desktop_width", "mobile_width", "updated_at")
-    list_filter = ("is_default",)
-    search_fields = ("name",)
-    fieldsets = (
-        ("基本設定", {"fields": ("name", "is_default")}),
+    list_display = ("name", "is_default", "base_preset_name", "desktop_summary", "mobile_summary", "updated_at")
+    list_filter = ("is_default", "base_preset_name")
+    search_fields = ("name", "base_preset_name")
+    fieldsets = tuple(
         (
-            "整體防護",
+            group["title"],
             {
-                "description": "這兩個比例依你的需求預設建議維持 0，以可讀性優先。",
-                "fields": ("char_to_pinyin_ratio", "char_reverse_ratio"),
+                "fields": group["fields"],
+                "description": group["description"],
             },
-        ),
-        (
-            "桌機版輸出",
-            {
-                "fields": (
-                    "desktop_width",
-                    "desktop_min_font_size",
-                    "desktop_max_font_size",
-                    "desktop_bg_density",
-                )
-            },
-        ),
-        (
-            "手機版輸出",
-            {
-                "fields": (
-                    "mobile_width",
-                    "mobile_min_font_size",
-                    "mobile_max_font_size",
-                    "mobile_bg_density",
-                )
-            },
-        ),
+        )
+        for group in AntiOcrPresetAdminForm.group_definitions
     )
+
+    @admin.display(description="桌機摘要")
+    def desktop_summary(self, obj: AntiOcrPreset) -> str:
+        summary = summarize_preset(obj.as_snapshot())
+        return f'{summary["desktop_width"]} px / 字級 {summary["desktop_font_range"]}'
+
+    @admin.display(description="手機摘要")
+    def mobile_summary(self, obj: AntiOcrPreset) -> str:
+        summary = summarize_preset(obj.as_snapshot())
+        return f'{summary["mobile_width"]} px / 字級 {summary["mobile_font_range"]}'
+
+
+@admin.register(CustomFontUpload)
+class CustomFontUploadAdmin(admin.ModelAdmin):
+    list_display = ("name", "is_active", "font_file", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("name", "font_file")
 
 
 @admin.register(Chapter)
@@ -85,18 +84,22 @@ class ChapterAdmin(admin.ModelAdmin):
             "章節內容",
             {
                 "fields": ("novel", "title", "slug", "sort_order", "status", "content"),
-                "description": "章節代稱目前只用於資料整理、唯一性與後台辨識；前台閱讀網址仍使用章節 ID。",
+                "description": "正式發布時會先完成桌機與手機兩套基底圖，完成後才讓讀者看到。",
             },
         ),
-        ("發布設定", {"fields": ("anti_ocr_preset", "current_version", "published_at")}),
+        (
+            "發布資訊",
+            {
+                "fields": ("anti_ocr_preset", "current_version", "published_at"),
+            },
+        ),
     )
 
+    @admin.display(description="快速發布")
     def publish_link(self, obj: Chapter):
-        return format_html('<a class="button" href="{}">發布</a>', reverse("admin-chapter-publish", args=[obj.pk]))
+        return format_html('<a class="button" href="{}">立即發布</a>', reverse("admin-chapter-publish", args=[obj.pk]))
 
-    publish_link.short_description = "快速發布"
-
-    @admin.action(description="發布所選章節")
+    @admin.action(description="發布選取章節")
     def publish_selected(self, request, queryset: QuerySet):
         for chapter in queryset:
             try:

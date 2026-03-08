@@ -2,31 +2,67 @@
 
 {% block title %}{{ page_title }} | CatchingRat 管理後台{% endblock %}
 {% block body_class %}backoffice-page{% endblock %}
-{% block main_class %}content-card--wide{% endblock %}
+{% block main_class %}content-card--wide backoffice-main{% endblock %}
 
 {% block content %}
-<section class="stack">
-    <header class="manage-hero">
-        <div>
+<section class="bo-layout">
+    <aside class="bo-sidebar">
+        <div class="bo-sidebar__brand">
             <p class="eyebrow">Friendly Backoffice</p>
-            <h2>{{ page_title }}</h2>
-            <p class="subtle">{{ page_subtitle }}</p>
+            <h2>管理後台</h2>
+            <p class="subtle">把常用工作集中成清楚的操作入口，降低非技術使用者的負擔。</p>
         </div>
-        <div class="manage-hero__actions">
-            {% block hero_actions %}{% endblock %}
+
+        <nav class="bo-nav" aria-label="管理導覽">
+            <a class="{% if manage_section == 'dashboard' %}active{% endif %}" href="{% url 'backoffice:dashboard' %}">
+                <strong>管理首頁</strong>
+                <span>快速開始與近期章節</span>
+            </a>
+            <a class="{% if manage_section == 'readers' %}active{% endif %}" href="{% url 'backoffice:reader-list' %}">
+                <strong>閱讀者管理</strong>
+                <span>帳號、密碼與授權</span>
+            </a>
+            <a class="{% if manage_section == 'novels' %}active{% endif %}" href="{% url 'backoffice:novel-list' %}">
+                <strong>小說與章節</strong>
+                <span>建立內容與正式發布</span>
+            </a>
+            <a class="{% if manage_section == 'settings' %}active{% endif %}" href="{% url 'backoffice:anti-ocr-list' %}">
+                <strong>anti7ocr 設定</strong>
+                <span>預設參數與字體庫</span>
+            </a>
+            <a class="{% if manage_section == 'tools' %}active{% endif %}" href="{% url 'backoffice:watermark-extract' %}">
+                <strong>工具</strong>
+                <span>浮水印提取與 OCR 診斷</span>
+            </a>
+        </nav>
+
+        <div class="bo-sidebar__meta">
+            <div class="bo-note">
+                <strong>字體庫</strong>
+                <p class="subtle">目前共有 {{ font_summary.total }} 套字體，其中 {{ font_summary.active }} 套啟用中。</p>
+                <a class="secondary-button" href="{% url 'backoffice:font-library' %}">管理字體</a>
+            </div>
+            <div class="bo-note">
+                <strong>進階維護</strong>
+                <p class="subtle">如需低頻維護或直接操作資料模型，仍可進入 Django admin。</p>
+                <a class="secondary-button" href="/admin/">開啟 Django admin</a>
+            </div>
         </div>
-    </header>
+    </aside>
 
-    <nav class="manage-tabs" aria-label="後台功能選單">
-        <a class="{% if manage_section == 'dashboard' %}active{% endif %}" href="{% url 'backoffice:dashboard' %}">儀表板</a>
-        <a class="{% if manage_section == 'readers' %}active{% endif %}" href="{% url 'backoffice:reader-list' %}">閱讀者管理</a>
-        <a class="{% if manage_section == 'novels' %}active{% endif %}" href="{% url 'backoffice:novel-list' %}">小說與章節</a>
-        <a class="{% if manage_section == 'settings' %}active{% endif %}" href="{% url 'backoffice:anti-ocr-list' %}">Anti-OCR 設定</a>
-        <a class="{% if manage_section == 'tools' %}active{% endif %}" href="{% url 'backoffice:watermark-extract' %}">浮水印工具</a>
-        <a href="/admin/">進階 Django admin</a>
-    </nav>
+    <div class="bo-content">
+        <header class="bo-header">
+            <div>
+                <p class="eyebrow">目前頁面</p>
+                <h1>{{ page_title }}</h1>
+                <p class="subtle">{{ page_subtitle }}</p>
+            </div>
+            <div class="bo-header__actions">
+                {% block hero_actions %}{% endblock %}
+            </div>
+        </header>
 
-    {% block manage_content %}{% endblock %}
+        {% block manage_content %}{% endblock %}
+    </div>
 </section>
 {% endblock %}
-

@@ -48,10 +48,10 @@ def create_extraction_record(uploaded_file, actor: User | None = None) -> Waterm
         process_log=[
             {
                 "stage": "upload",
-                "label": "收到上傳檔案",
+                "label": "接收上傳圖片",
                 "success": True,
                 "duration_ms": 0,
-                "message": f"已收到圖片，尺寸 {image_width}x{image_height}。",
+                "message": f"已接收圖片，尺寸 {image_width}x{image_height}。",
             }
         ],
     )
@@ -74,15 +74,22 @@ def process_extraction_record(record_id: int) -> WatermarkExtractionRecord:
         record,
         {
             "stage": "start",
-            "label": "開始背景提取",
+            "label": "開始提取",
             "success": True,
             "duration_ms": 0,
-            "message": "先嘗試完整原圖提取；若失敗，會再進入自動裁切與多圖拼接判讀。",
+            "message": "先嘗試全圖提取，再進入內容區塊與網頁截圖視窗抽樣。",
         },
     )
 
+    def progress_callback(entry: dict) -> None:
+        if entry.get("success") or entry.get("stage") in {"input", "cropped", "source_match"}:
+            append_extraction_log(record, entry)
+
     try:
-        result = extract_watermark_from_path(str(record.absolute_upload_path))
+        result = extract_watermark_from_path(
+            str(record.absolute_upload_path),
+            progress_callback=progress_callback,
+        )
     except Exception as exc:
         record.status = WatermarkExtractionRecord.Status.FAILED
         record.error_message = str(exc)
@@ -91,10 +98,10 @@ def process_extraction_record(record_id: int) -> WatermarkExtractionRecord:
             record,
             {
                 "stage": "finish",
-                "label": "提取結束",
+                "label": "提取失敗",
                 "success": False,
                 "duration_ms": 0,
-                "message": f"提取時發生錯誤：{exc}",
+                "message": f"處理途中發生錯誤：{exc}",
             },
         )
         record.save(update_fields=["status", "error_message", "finished_at"])
@@ -106,7 +113,9 @@ def process_extraction_record(record_id: int) -> WatermarkExtractionRecord:
     record.attempt_count = result["attempt_count"]
     record.duration_ms = result["duration_ms"]
     record.finished_at = timezone.now()
-    record.process_log = list(record.process_log or []) + result["trace"][1:]
+    record.process_log = list(record.process_log or []) + [
+        entry for entry in result["trace"][1:] if entry not in list(record.process_log or [])
+    ]
     if result["parsed"] is not None:
         record.parsed_reader_id = result["parsed"]["reader_id"]
         record.parsed_yyyymmdd = result["parsed"]["yyyymmdd"]
@@ -116,13 +125,13 @@ def process_extraction_record(record_id: int) -> WatermarkExtractionRecord:
     record.process_log.append(
         {
             "stage": "finish",
-            "label": "提取完成",
+            "label": "完成提取",
             "success": bool(result["parsed"] is not None),
             "duration_ms": 0,
             "message": (
-                f"成功解析為 {record.parsed_reader_id}|{record.parsed_yyyymmdd}。"
+                f"提取成功：{record.parsed_reader_id}|{record.parsed_yyyymmdd}"
                 if result["parsed"] is not None
-                else "已完成所有嘗試，但仍無法穩定還原浮水印。"
+                else "所有嘗試都沒有得到有效結果，請改用原圖或更大範圍截圖再試一次。"
             ),
         }
     )

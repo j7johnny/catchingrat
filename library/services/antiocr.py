@@ -5,29 +5,37 @@ import hashlib
 from pathlib import Path
 import random
 import re
+from typing import Any
 
-from antiocr.anti_ocr import AntiOcr
-from django.conf import settings
 import numpy as np
+from anti7ocr.pipeline import PipelineEngine
+from anti7ocr.pipeline.context import PipelineContext
+from anti7ocr.pipeline.stages.layout import LayoutStage
+from django.conf import settings
 from PIL import Image
 
 from library.models import AntiOcrPreset, BasePage, ChapterVersion, DeviceProfile
 
+from .anti7ocr_config import (
+    DEFAULT_BASE_PRESET_NAME,
+    build_default_desktop_config,
+    build_default_mobile_config,
+    build_default_shared_config,
+    build_runtime_config,
+    normalize_preset_snapshot,
+)
+from .font_library import list_runtime_font_paths
 from .storage import delete_relative_path, ensure_parent, media_relative
 
-anti_ocr_client = AntiOcr()
 cjk_char_pattern = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 horizontal_space_pattern = re.compile(r"[ \t]+")
-base_page_layout_version = "v3"
+base_page_layout_version = "v4"
 
 
 @dataclass(frozen=True)
 class RenderProfile:
     code: str
     width: int
-    min_font_size: int
-    max_font_size: int
-    bg_density: float
     initial_height: int
     slice_target_height: int
     min_slice_height: int
@@ -35,15 +43,29 @@ class RenderProfile:
     first_page_min_cn: int = 200
 
 
+@dataclass(frozen=True)
+class RenderedLine:
+    index: int
+    top: int
+    bottom: int
+    text: str
+    char_count: int
+
+
+@dataclass(frozen=True)
+class SlicePlan:
+    start: int
+    end: int
+    char_count: int
+
+
 profile_targets = {
     DeviceProfile.DESKTOP: {
-        "initial_height": 860,
         "slice_target_height": 290,
         "min_slice_height": 96,
         "min_watermark_height": 180,
     },
     DeviceProfile.MOBILE: {
-        "initial_height": 760,
         "slice_target_height": 250,
         "min_slice_height": 110,
         "min_watermark_height": 220,
@@ -55,17 +77,11 @@ def get_default_preset() -> AntiOcrPreset:
     preset, _ = AntiOcrPreset.objects.get_or_create(
         is_default=True,
         defaults={
-            "name": "Default",
-            "char_to_pinyin_ratio": 0,
-            "char_reverse_ratio": 0,
-            "desktop_width": 600,
-            "desktop_min_font_size": 22,
-            "desktop_max_font_size": 28,
-            "desktop_bg_density": 0.08,
-            "mobile_width": 420,
-            "mobile_min_font_size": 20,
-            "mobile_max_font_size": 24,
-            "mobile_bg_density": 0.06,
+            "name": "網站預設（anti7ocr 可讀性優先）",
+            "base_preset_name": DEFAULT_BASE_PRESET_NAME,
+            "shared_config": build_default_shared_config(),
+            "desktop_config": build_default_desktop_config(),
+            "mobile_config": build_default_mobile_config(),
         },
     )
     return preset
@@ -75,11 +91,11 @@ def build_source_sha256(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def resolve_font_path() -> str:
-    for font_path in settings.ANTI_OCR_FONT_PATHS:
-        if font_path and Path(font_path).is_file():
-            return font_path
-    raise FileNotFoundError("No usable anti-OCR font file was found.")
+def resolve_font_paths() -> list[str]:
+    usable = list_runtime_font_paths()
+    if not usable:
+        raise FileNotFoundError("No usable anti7ocr font file was found.")
+    return usable
 
 
 def count_cn_chars(text: str) -> int:
@@ -107,105 +123,138 @@ def normalize_content(content: str) -> str:
     return "\n".join(normalized_lines).strip()
 
 
-def build_render_profile(snapshot: dict, device_profile: str) -> RenderProfile:
-    profile_snapshot = snapshot[device_profile]
+def build_render_profile(snapshot: dict[str, Any], device_profile: str) -> RenderProfile:
+    normalized = normalize_preset_snapshot(snapshot)
+    profile_snapshot = normalized["desktop_config"] if device_profile == DeviceProfile.DESKTOP else normalized["mobile_config"]
     targets = profile_targets[device_profile]
     return RenderProfile(
         code=device_profile,
-        width=profile_snapshot["width"],
-        min_font_size=profile_snapshot["min_font_size"],
-        max_font_size=profile_snapshot["max_font_size"],
-        bg_density=profile_snapshot["bg_density"],
-        initial_height=targets["initial_height"],
+        width=int(profile_snapshot["canvas"]["width"]),
+        initial_height=int(profile_snapshot["canvas"]["height"]),
         slice_target_height=targets["slice_target_height"],
         min_slice_height=targets["min_slice_height"],
         min_watermark_height=targets["min_watermark_height"],
     )
 
 
-def render_text_image(text: str, snapshot: dict, device_profile: str) -> Image.Image:
-    font_path = resolve_font_path()
-    profile = build_render_profile(snapshot, device_profile)
-    normalized_text = normalize_content(text) or " "
-    seed_source = f"{device_profile}\n{normalized_text}"
-    seed = int(hashlib.sha256(seed_source.encode("utf-8")).hexdigest()[:8], 16)
-    random_state = random.getstate()
-    np_state = np.random.get_state()
-    random.seed(seed)
-    np.random.seed(seed)
-    try:
-        image = anti_ocr_client(
-            normalized_text,
-            font_fp=font_path,
-            char_to_pinyin_ratio=snapshot["char_to_pinyin_ratio"],
-            char_reverse_ratio=snapshot["char_reverse_ratio"],
-            min_font_size=profile.min_font_size,
-            max_font_size=profile.max_font_size,
-            bg_gen_config={
-                "image_size": (profile.width, profile.initial_height),
-                "text_density": max(profile.bg_density, 0.01),
-            },
+def build_render_seed(text: str, device_profile: str) -> int:
+    seed_source = f"{device_profile}\n{text}"
+    return int(hashlib.sha256(seed_source.encode("utf-8")).hexdigest()[:8], 16)
+
+
+def _make_context(text: str, config: dict[str, Any], seed: int) -> PipelineContext:
+    return PipelineContext(
+        text=text,
+        config=config,
+        py_rng=random.Random(seed),
+        np_rng=np.random.default_rng(seed),
+        seed=seed,
+        metadata={},
+    )
+
+
+def _estimate_canvas_height(text: str, runtime_config: dict[str, Any], seed: int) -> int:
+    preview_ctx = _make_context(text, runtime_config, seed)
+    preview_ctx = LayoutStage()(preview_ctx)
+    line_count = max((token.line_index for token in preview_ctx.layout.tokens), default=-1) + 1
+    line_count = max(line_count, 1)
+    max_size = int(runtime_config["font"].get("max_size", 24))
+    line_height_multiplier = float(runtime_config["layout"].get("line_height_multiplier", 1.4))
+    margin = int(runtime_config["canvas"].get("margin", 16))
+    estimated = int(margin * 2 + line_count * max_size * line_height_multiplier + max_size * 2)
+    return max(int(runtime_config["canvas"].get("height", estimated)), estimated)
+
+
+def render_text_image(content: str, snapshot: dict[str, Any], device_profile: str) -> tuple[Image.Image, dict[str, Any]]:
+    normalized_text = normalize_content(content) or " "
+    resolve_font_paths()
+    runtime_config = build_runtime_config(snapshot, device_profile)
+    runtime_config["canvas"]["height"] = _estimate_canvas_height(normalized_text, runtime_config, build_render_seed(normalized_text, device_profile))
+    seed = build_render_seed(normalized_text, device_profile)
+    ctx = _make_context(normalized_text, runtime_config, seed)
+    ctx = PipelineEngine().run(ctx)
+    if ctx.image is None or ctx.render is None or ctx.layout is None:
+        raise RuntimeError("anti7ocr pipeline did not return an image.")
+    return ctx.image, {
+        "config": runtime_config,
+        "glyphs": list(ctx.render.glyphs),
+        "tokens": list(ctx.layout.tokens),
+        "metadata": dict(ctx.metadata),
+    }
+
+
+def build_line_infos(render_data: dict[str, Any]) -> list[RenderedLine]:
+    tokens_by_line: dict[int, list[str]] = {}
+    for token in render_data["tokens"]:
+        tokens_by_line.setdefault(token.line_index, []).append(token.char)
+
+    glyphs_by_line: dict[int, list[Any]] = {}
+    for glyph in render_data["glyphs"]:
+        glyphs_by_line.setdefault(glyph.line_index, []).append(glyph)
+
+    lines: list[RenderedLine] = []
+    for line_index in sorted(glyphs_by_line):
+        glyphs = glyphs_by_line[line_index]
+        if not glyphs:
+            continue
+        top = min(glyph.bbox[1] for glyph in glyphs)
+        bottom = max(glyph.bbox[3] for glyph in glyphs)
+        text = "".join(tokens_by_line.get(line_index, []))
+        lines.append(
+            RenderedLine(
+                index=line_index,
+                top=top,
+                bottom=bottom,
+                text=text,
+                char_count=count_cn_chars(text),
+            )
         )
-    finally:
-        random.setstate(random_state)
-        np.random.set_state(np_state)
-    if image.width > profile.width:
-        height = int(image.height * profile.width / image.width)
-        image = image.resize((profile.width, height))
-    return image
+    return lines
 
 
-def build_slice_ranges(image_height: int, profile: RenderProfile) -> list[tuple[int, int]]:
-    if image_height <= profile.slice_target_height:
-        return [(0, image_height)]
+def _cut_position(current_line: RenderedLine, next_line: RenderedLine | None, image_height: int) -> int:
+    if next_line is None:
+        return image_height
+    return min(image_height, max(current_line.bottom, (current_line.bottom + next_line.top) // 2))
 
-    ranges: list[tuple[int, int]] = []
+
+def build_slice_plans(lines: list[RenderedLine], image_height: int, profile: RenderProfile) -> list[SlicePlan]:
+    if not lines:
+        return [SlicePlan(start=0, end=image_height, char_count=0)]
+
+    total_cn_chars = sum(line.char_count for line in lines)
+    first_page_target = profile.first_page_min_cn if total_cn_chars >= profile.first_page_min_cn else 0
+    plans: list[SlicePlan] = []
     start = 0
-    while start < image_height:
-        remaining = image_height - start
-        if remaining <= profile.slice_target_height:
-            end = image_height
-        elif remaining - profile.slice_target_height < profile.min_slice_height:
-            end = image_height
-        else:
-            end = start + profile.slice_target_height
-        ranges.append((start, end))
-        start = end
-    return ranges
+    page_char_count = 0
+    start_line_index = 0
 
-
-def distribute_char_counts(total_cn_chars: int, slice_heights: list[int], first_page_min_cn: int) -> list[int]:
-    if not slice_heights:
-        return []
-    if total_cn_chars <= 0:
-        return [0 for _ in slice_heights]
-
-    total_height = sum(slice_heights) or 1
-    raw_counts = [total_cn_chars * height / total_height for height in slice_heights]
-    counts = [int(value) for value in raw_counts]
-
-    remainder = total_cn_chars - sum(counts)
-    if remainder > 0:
-        order = sorted(
-            range(len(raw_counts)),
-            key=lambda index: raw_counts[index] - counts[index],
-            reverse=True,
+    for index, line in enumerate(lines):
+        page_char_count += line.char_count
+        cut = _cut_position(line, lines[index + 1] if index + 1 < len(lines) else None, image_height)
+        current_height = cut - start
+        remaining_height = image_height - cut
+        first_page_ready = bool(plans) or first_page_target == 0 or page_char_count >= first_page_target
+        should_cut = (
+            current_height >= profile.slice_target_height
+            and first_page_ready
+            and remaining_height >= profile.min_slice_height
         )
-        for index in order[:remainder]:
-            counts[index] += 1
+        if should_cut:
+            plans.append(SlicePlan(start=start, end=cut, char_count=page_char_count))
+            start = cut
+            page_char_count = 0
+            start_line_index = index + 1
 
-    if total_cn_chars >= first_page_min_cn and counts[0] < first_page_min_cn:
-        needed = first_page_min_cn - counts[0]
-        counts[0] += needed
-        for index in range(len(counts) - 1, 0, -1):
-            transferable = max(0, counts[index] - 1)
-            taken = min(needed, transferable)
-            counts[index] -= taken
-            needed -= taken
-            if needed == 0:
-                break
+    if start_line_index < len(lines):
+        plans.append(SlicePlan(start=start, end=image_height, char_count=page_char_count))
 
-    return counts
+    if len(plans) > 1 and plans[-1].end - plans[-1].start < profile.min_slice_height:
+        last = plans.pop()
+        previous = plans.pop()
+        plans.append(SlicePlan(start=previous.start, end=last.end, char_count=previous.char_count + last.char_count))
+
+    return plans
 
 
 def pad_page_image(image: Image.Image, min_height: int) -> Image.Image:
@@ -222,22 +271,20 @@ def pad_page_image(image: Image.Image, min_height: int) -> Image.Image:
     return padded
 
 
-def render_chapter_page_images(content: str, snapshot: dict, device_profile: str) -> list[tuple[Image.Image, int]]:
+def render_chapter_page_images(content: str, snapshot: dict[str, Any], device_profile: str) -> list[tuple[Image.Image, int]]:
     profile = build_render_profile(snapshot, device_profile)
-    chapter_image = render_text_image(content, snapshot, device_profile)
-    slice_ranges = build_slice_ranges(chapter_image.height, profile)
-    slice_heights = [end - start for start, end in slice_ranges]
-    total_cn_chars = count_cn_chars(content)
-    char_counts = distribute_char_counts(total_cn_chars, slice_heights, profile.first_page_min_cn)
-
-    pages: list[tuple[Image.Image, int]] = []
-    for index, (start, end) in enumerate(slice_ranges):
-        page_image = chapter_image.crop((0, start, chapter_image.width, end)).copy()
-        page_image = pad_page_image(page_image, profile.min_watermark_height)
-        pages.append((page_image, char_counts[index]))
-
-    chapter_image.close()
-    return pages
+    chapter_image, render_data = render_text_image(content, snapshot, device_profile)
+    try:
+        line_infos = build_line_infos(render_data)
+        slice_plans = build_slice_plans(line_infos, chapter_image.height, profile)
+        pages: list[tuple[Image.Image, int]] = []
+        for plan in slice_plans:
+            page_image = chapter_image.crop((0, plan.start, chapter_image.width, plan.end)).copy()
+            page_image = pad_page_image(page_image, profile.min_watermark_height)
+            pages.append((page_image, plan.char_count))
+        return pages
+    finally:
+        chapter_image.close()
 
 
 def base_page_relative_path(chapter_version_id: int, device_profile: str, page_index: int) -> str:
@@ -250,7 +297,7 @@ def base_page_relative_path(chapter_version_id: int, device_profile: str, page_i
     )
 
 
-def base_pages_need_regeneration(pages: list[BasePage], device_profile: str, snapshot: dict) -> bool:
+def base_pages_need_regeneration(pages: list[BasePage], device_profile: str, snapshot: dict[str, Any]) -> bool:
     if not pages:
         return True
 
@@ -262,6 +309,8 @@ def base_pages_need_regeneration(pages: list[BasePage], device_profile: str, sna
         if not page.absolute_path.exists():
             return True
         if page.image_height < profile.min_watermark_height:
+            return True
+        if page.image_width > profile.width:
             return True
     return False
 

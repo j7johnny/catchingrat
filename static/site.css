@@ -177,6 +177,11 @@ a {
     padding: 28px;
 }
 
+.backoffice-main {
+    padding: 0;
+    overflow: hidden;
+}
+
 .stack {
     display: grid;
     gap: 24px;
@@ -213,6 +218,10 @@ a {
     font: inherit;
 }
 
+.field--full {
+    grid-column: 1 / -1;
+}
+
 .messages {
     display: grid;
     gap: 8px;
@@ -231,6 +240,123 @@ a {
     align-items: flex-start;
     gap: 18px;
     flex-wrap: wrap;
+}
+
+.bo-layout {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    min-height: 720px;
+}
+
+.bo-sidebar {
+    display: grid;
+    gap: 20px;
+    align-content: start;
+    padding: 28px 24px;
+    border-right: 1px solid var(--line);
+    background:
+        linear-gradient(180deg, rgba(255, 250, 242, 0.98), rgba(247, 239, 229, 0.92));
+}
+
+.bo-sidebar__brand h2,
+.bo-header h1 {
+    margin: 0 0 8px;
+}
+
+.bo-nav {
+    display: grid;
+    gap: 10px;
+}
+
+.bo-nav a {
+    display: grid;
+    gap: 4px;
+    padding: 14px 16px;
+    border-radius: 18px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.74);
+}
+
+.bo-nav a strong {
+    color: var(--ink);
+}
+
+.bo-nav a span {
+    color: var(--muted);
+    font-size: 0.92rem;
+    line-height: 1.5;
+}
+
+.bo-nav a.active {
+    background: linear-gradient(135deg, rgba(138, 61, 33, 0.92), rgba(110, 46, 25, 0.92));
+    border-color: transparent;
+}
+
+.bo-nav a.active strong,
+.bo-nav a.active span {
+    color: white;
+}
+
+.bo-sidebar__meta {
+    display: grid;
+    gap: 14px;
+}
+
+.bo-note {
+    display: grid;
+    gap: 10px;
+    padding: 16px;
+    border-radius: 20px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.7);
+}
+
+.bo-content {
+    display: grid;
+    gap: 22px;
+    align-content: start;
+    padding: 28px;
+}
+
+.bo-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 18px;
+    flex-wrap: wrap;
+}
+
+.bo-header__actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.bo-hint-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.bo-hint-card,
+.bo-empty-state {
+    display: grid;
+    gap: 8px;
+    padding: 16px;
+    border-radius: 18px;
+    border: 1px dashed rgba(138, 61, 33, 0.24);
+    background: rgba(255, 255, 255, 0.62);
+}
+
+.bo-empty-state strong,
+.bo-hint-card strong {
+    color: var(--accent);
+}
+
+.setup-panel {
+    max-width: 520px;
+    margin: 0 auto;
 }
 
 .manage-hero h2 {
@@ -309,6 +435,15 @@ a {
     border-radius: 24px;
     border: 1px solid var(--line);
     background: rgba(255, 255, 255, 0.64);
+}
+
+.preset-section {
+    display: grid;
+    gap: 14px;
+    padding: 18px;
+    border-radius: 20px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.72);
 }
 
 .section-heading h3,
@@ -515,6 +650,30 @@ a {
     align-items: center;
 }
 
+.diagnostic-preview {
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    border-radius: 22px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.82);
+}
+
+.diagnostic-preview img {
+    display: block;
+    width: min(100%, 600px);
+    height: auto;
+    border-radius: 18px;
+}
+
+pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: "Consolas", "Courier New", monospace;
+    line-height: 1.55;
+}
+
 .novel-block {
     display: grid;
     gap: 14px;
@@ -689,6 +848,24 @@ a {
         border-radius: 20px;
     }
 
+    .backoffice-main {
+        padding: 0;
+    }
+
+    .bo-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .bo-sidebar {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        padding: 20px 16px;
+    }
+
+    .bo-content {
+        padding: 20px 16px;
+    }
+
     .reader-page {
         max-width: 100%;
     }
@@ -703,14 +880,16 @@ a {
 
     .site-footer,
     .manage-hero,
-    .list-row {
+    .list-row,
+    .bo-header {
         align-items: stretch;
     }
 
     .list-row,
     .manage-hero__actions,
     .form-actions,
-    .actions-cell {
+    .actions-cell,
+    .bo-header__actions {
         flex-direction: column;
     }
 

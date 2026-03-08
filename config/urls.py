@@ -12,6 +12,7 @@ urlpatterns = [
     path("", include("backoffice.urls")),
     path("reader/", include("reader.urls")),
     path("admin/chapters/<int:pk>/publish", library_views.publish_chapter_view, name="admin-chapter-publish"),
+    path("admin/anti7ocr/diagnostics/", library_views.anti7ocr_diagnostics_view, name="admin-anti7ocr-diagnostics"),
     path("admin/watermark/extract", library_views.watermark_extract_view, name="admin-watermark-extract"),
     path("admin/", admin.site.urls),
 ]

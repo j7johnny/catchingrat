@@ -1,4 +1,5 @@
-from django.contrib import admin
+from __future__ import annotations
+
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.shortcuts import get_object_or_404, redirect
@@ -16,8 +17,13 @@ def publish_chapter_view(request, pk: int):
         version = publish_chapter(chapter, actor=request.user, request=request)
     except ValueError as exc:
         messages.error(request, str(exc))
+    except Exception as exc:
+        messages.error(request, f"發布失敗：{exc}")
     else:
-        messages.success(request, f"已發布 {chapter.title}，版本 v{version.version_number}。")
+        messages.success(
+            request,
+            f"已完成發布：{chapter.title}（版本 v{version.version_number}）。桌機與手機基底圖都已完成。",
+        )
     return redirect(f"/admin/library/chapter/{chapter.pk}/change/")
 
 
@@ -25,3 +31,9 @@ def publish_chapter_view(request, pk: int):
 @require_http_methods(["GET", "POST"])
 def watermark_extract_view(request):
     return redirect("backoffice:watermark-extract")
+
+
+@staff_member_required
+@require_http_methods(["GET", "POST"])
+def anti7ocr_diagnostics_view(request):
+    return redirect("backoffice:anti7ocr-diagnostics")

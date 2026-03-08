@@ -1,7 +1,7 @@
 {% extends "admin/base.html" %}
 {% load static %}
 
-{% block title %}{{ title }} | CatchingRat 後台{% endblock %}
+{% block title %}{{ title }} | CatchingRat 管理後台{% endblock %}
 
 {% block extrastyle %}
 {{ block.super }}
@@ -65,6 +65,7 @@
 
 {% block nav-global %}
 <a href="{% url 'backoffice:dashboard' %}" style="color: var(--header-link-color); margin-right: 12px;">友善後台</a>
-<a href="{% url 'admin-watermark-extract' %}" style="color: var(--header-link-color); margin-right: 12px;">浮水印提取</a>
-<a href="/" style="color: var(--header-link-color);">回到前台</a>
+<a href="{% url 'admin-anti7ocr-diagnostics' %}" style="color: var(--header-link-color); margin-right: 12px;">anti7ocr 診斷</a>
+<a href="{% url 'admin-watermark-extract' %}" style="color: var(--header-link-color); margin-right: 12px;">提取浮水印</a>
+<a href="/" style="color: var(--header-link-color);">前台首頁</a>
 {% endblock %}

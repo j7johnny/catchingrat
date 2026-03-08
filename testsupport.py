@@ -22,6 +22,10 @@ def cleanup_temp_media_root(path: Path) -> None:
         shutil.rmtree(path, ignore_errors=True)
 
 
+def has_tesseract() -> bool:
+    return shutil.which("tesseract") is not None
+
+
 def build_long_chinese_text(paragraphs: int = 6, repeats: int = 16) -> str:
     sentence = "春夜的風穿過舊城牆，燈影沿著青石路慢慢鋪開，茶香與雨聲交錯成一種柔軟的節奏。"
     blocks = []

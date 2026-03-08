@@ -12,8 +12,8 @@
     <form method="post" class="manage-panel">
         {% csrf_token %}
         <div class="section-heading">
-            <h3>{% if novel %}小說資料{% else %}建立小說{% endif %}</h3>
-            <p class="subtle">管理者使用的基本資料，可隨時修改。</p>
+            <h3>{% if novel %}小說資料{% else %}新增小說{% endif %}</h3>
+            <p class="subtle">小說建立後，章節就能直接掛在這本小說下。</p>
         </div>
         {{ form.non_field_errors }}
         {% for field in form %}
@@ -32,7 +32,7 @@
     <section class="manage-panel">
         <div class="section-heading">
             <h3>章節列表</h3>
-            <p class="subtle">依排序顯示，可直接編輯或重新發布。</p>
+            <p class="subtle">可直接進入章節頁進行編輯與發布。</p>
         </div>
         {% if novel %}
             <div class="table-wrap">
@@ -52,27 +52,26 @@
                                 <td>{{ chapter.sort_order }}</td>
                                 <td>{{ chapter.title }}</td>
                                 <td>{{ chapter.get_status_display }}</td>
-                                <td>{% if chapter.current_version %}v{{ chapter.current_version.version_number }}{% else %}未發布{% endif %}</td>
+                                <td>{% if chapter.current_version %}v{{ chapter.current_version.version_number }}{% else %}尚未發布{% endif %}</td>
                                 <td class="actions-cell">
                                     <a class="secondary-button" href="{% url 'backoffice:chapter-detail' chapter.id %}">編輯</a>
                                     <form method="post" action="{% url 'backoffice:chapter-publish' chapter.id %}">
                                         {% csrf_token %}
-                                        <button type="submit" class="primary-button">重新發布</button>
+                                        <button type="submit" class="primary-button">立即發布</button>
                                     </form>
                                 </td>
                             </tr>
                         {% empty %}
                             <tr>
-                                <td colspan="5">目前還沒有章節，請先新增章節。</td>
+                                <td colspan="5">目前還沒有章節。</td>
                             </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
         {% else %}
-            <p class="subtle">建立小說後，這裡會出現章節列表與快速操作。</p>
+            <p class="subtle">請先建立小說，之後這裡才會顯示章節。</p>
         {% endif %}
     </section>
 </section>
 {% endblock %}
-

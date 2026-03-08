@@ -3,7 +3,7 @@
 {% block hero_actions %}
 <a class="secondary-button" href="{% url 'backoffice:novel-list' %}">回小說列表</a>
 {% if chapter %}
-    <a class="secondary-button" href="{% url 'backoffice:novel-detail' chapter.novel_id %}">回到小說頁</a>
+    <a class="secondary-button" href="{% url 'backoffice:novel-detail' chapter.novel_id %}">回本書頁面</a>
 {% endif %}
 {% endblock %}
 
@@ -13,11 +13,11 @@
         {% csrf_token %}
         <div class="section-heading">
             <h3>{% if chapter %}章節內容{% else %}新增章節{% endif %}</h3>
-            <p class="subtle">儲存草稿只會更新資料；按下立即發布後，讀者端才會看到新圖片。</p>
+            <p class="subtle">正式發布時，系統會先完成桌機與手機兩套基底圖，完成後才會對讀者開放。</p>
         </div>
         {{ form.non_field_errors }}
         {% for field in form %}
-            <label class="field">
+            <label class="field {% if field.name == 'content' %}field--full{% endif %}">
                 <span>{{ field.label }}</span>
                 {{ field }}
                 {% if field.help_text %}<small class="field-help">{{ field.help_text }}</small>{% endif %}
@@ -26,14 +26,14 @@
         {% endfor %}
         <div class="form-actions">
             <button type="submit" name="action" value="save" class="secondary-button">儲存草稿</button>
-            <button type="submit" name="action" value="publish" class="primary-button">立即發布</button>
+            <button type="submit" name="action" value="publish" class="primary-button">發布並等待基底圖完成</button>
         </div>
     </form>
 
     <section class="manage-panel">
         <div class="section-heading">
-            <h3>目前狀態</h3>
-            <p class="subtle">這裡顯示讀者實際看到的是哪個版本。</p>
+            <h3>章節資訊</h3>
+            <p class="subtle">這裡提供目前狀態與發布提醒。</p>
         </div>
         {% if chapter %}
             <dl class="meta-list">
@@ -46,7 +46,7 @@
                     <dd>{{ chapter.get_status_display }}</dd>
                 </div>
                 <div>
-                    <dt>目前發布版本</dt>
+                    <dt>目前版本</dt>
                     <dd>{% if chapter.current_version %}v{{ chapter.current_version.version_number }}{% else %}尚未發布{% endif %}</dd>
                 </div>
                 <div>
@@ -54,14 +54,27 @@
                     <dd>{% if chapter.published_at %}{{ chapter.published_at|date:"Y-m-d H:i" }}{% else %}尚未發布{% endif %}</dd>
                 </div>
                 <div>
-                    <dt>使用參數集</dt>
-                    <dd>{% if chapter.anti_ocr_preset %}{{ chapter.anti_ocr_preset.name }}{% else %}系統預設{% endif %}</dd>
+                    <dt>套用 anti7ocr 設定</dt>
+                    <dd>{% if chapter.anti_ocr_preset %}{{ chapter.anti_ocr_preset.name }}{% else %}使用全站預設{% endif %}</dd>
                 </div>
             </dl>
         {% else %}
-            <p class="subtle">新增章節後，這裡會顯示發布版本與時間。</p>
+            <div class="bo-empty-state">
+                <strong>先建立章節</strong>
+                <p class="subtle">建立後，這裡會顯示狀態、版本與發布資訊。</p>
+            </div>
         {% endif %}
+
+        <div class="bo-hint-grid">
+            <article class="bo-hint-card">
+                <strong>發布完成條件</strong>
+                <p class="subtle">只有當桌機與手機基底圖都產生完成時，章節才會切換成可讀狀態。</p>
+            </article>
+            <article class="bo-hint-card">
+                <strong>讀者端流程</strong>
+                <p class="subtle">讀者開章時只需即時植入 blind watermark，不會再跟基底圖產生搶資源。</p>
+            </article>
+        </div>
     </section>
 </section>
 {% endblock %}
-

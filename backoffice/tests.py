@@ -1,9 +1,12 @@
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from pathlib import Path
+from unittest.mock import patch
 
 from accounts.models import User
-from library.models import Chapter, Novel, ReaderChapterGrant, ReaderNovelGrant, WatermarkExtractionRecord
+from library.models import AntiOcrPreset, Chapter, CustomFontUpload, Novel, ReaderChapterGrant, ReaderNovelGrant, WatermarkExtractionRecord
+from library.services.antiocr import get_default_preset
 from library.services.publishing import build_daily_page, publish_chapter
 from testsupport import build_long_chinese_text, cleanup_temp_media_root, find_font_or_skip, make_temp_media_root
 
@@ -167,6 +170,104 @@ class BackofficeFlowTests(TestCase):
         self.assertEqual(record.parsed_reader_id, "reader01")
         self.assertEqual(record.parsed_yyyymmdd, today.strftime("%Y%m%d"))
         self.assertGreater(len(record.process_log), 1)
+
+    def test_admin_can_open_anti7ocr_diagnostics_page(self):
+        admin = self.create_admin()
+        get_default_preset()
+        self.client.force_login(admin)
+
+        response = self.client.get("/manage/tools/anti7ocr-diagnostics/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "anti7ocr 診斷工具")
+
+    def test_admin_can_submit_anti7ocr_diagnostics(self):
+        admin = self.create_admin()
+        preset = get_default_preset()
+        self.client.force_login(admin)
+
+        with patch("backoffice.views.run_diagnostics") as run_diagnostics:
+            run_diagnostics.return_value = {
+                "seed": 1234,
+                "image_url": "/media/anti7ocr_diagnostics/example.png",
+                "recognized_text": "測試輸出",
+                "cer": 0.25,
+                "avg_cer": {"tesseract": 0.25},
+                "metadata": {"line_count": 3},
+                "sensitive_check": {"enabled": False},
+                "errors": {},
+            }
+            response = self.client.post(
+                "/manage/tools/anti7ocr-diagnostics/",
+                {
+                    "text": "這是一段 anti7ocr 診斷測試文字。",
+                    "preset": str(preset.id),
+                    "device_profile": "desktop",
+                    "seed": "1234",
+                    "sensitive_keywords": "機密詞",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "CER 0.2500")
+        self.assertContains(response, "測試輸出")
+        run_diagnostics.assert_called_once()
+
+    def test_admin_can_preview_anti7ocr_preset_before_save(self):
+        admin = self.create_admin()
+        self.client.force_login(admin)
+
+        with patch("backoffice.views.generate_preview") as generate_preview:
+            generate_preview.return_value = {
+                "seed": 4321,
+                "image_url": "/media/anti7ocr_previews/example.png",
+                "relative_path": "anti7ocr_previews/example.png",
+            }
+            response = self.client.post(
+                "/manage/settings/anti-ocr/new/",
+                {
+                    "name": "預覽用設定",
+                    "is_default": "",
+                    "base_preset_name": "tw_readable",
+                    "preview_text": "這是一段預覽測試文字。",
+                    "preview_device_profile": "desktop",
+                    "action": "preview",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "anti7ocr_previews/example.png")
+        self.assertFalse(CustomFontUpload.objects.exists())
+        self.assertFalse(AntiOcrPreset.objects.filter(name="預覽用設定").exists())
+        generate_preview.assert_called_once()
+
+    def test_admin_can_upload_custom_font(self):
+        admin = self.create_admin()
+        self.client.force_login(admin)
+        font_path = Path(self.font_path)
+
+        upload = SimpleUploadedFile(
+            font_path.name,
+            font_path.read_bytes(),
+            content_type="font/ttf",
+        )
+        response = self.client.post(
+            "/manage/settings/anti-ocr/fonts/",
+            {
+                "name": "測試字體",
+                "font_file": upload,
+                "is_active": "on",
+            },
+            follow=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/manage/settings/anti-ocr/fonts/")
+        font = CustomFontUpload.objects.get(name="測試字體")
+        self.assertTrue(font.is_active)
+        self.assertTrue(font.font_file.name.endswith(font_path.suffix))
 
     def test_dashboard_shows_version_string(self):
         admin = self.create_admin()

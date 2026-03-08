@@ -19,6 +19,9 @@ RUN apt-get update \
         libsm6 \
         libxext6 \
         libxrender1 \
+        tesseract-ocr \
+        tesseract-ocr-chi-tra \
+        tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt requirements-dev.txt /app/

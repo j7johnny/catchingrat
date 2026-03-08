@@ -8,4 +8,4 @@ django-redis~=6.0
 gunicorn~=25.1
 blind-watermark~=0.4.4
 requests~=2.32
-antiocr @ git+https://github.com/breezedeus/antiOCR.git@c80a11b79ff2e10200c12fb32500b8b3702de168
+anti7ocr[eval] @ git+https://github.com/j7johnny/anti7ocr.git@451d8ff53ac0801a42236e7d3b27c79710b948d5

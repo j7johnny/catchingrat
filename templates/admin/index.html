@@ -1,5 +1,5 @@
 {% extends "admin/base_site.html" %}
-{% load i18n static %}
+{% load i18n static log %}
 
 {% block extrastyle %}
 {{ block.super }}
@@ -14,20 +14,24 @@
 {% block content %}
 <div class="cr-admin-tools">
     <a class="cr-admin-card" href="{% url 'backoffice:dashboard' %}">
-        <strong>友善管理後台</strong>
-        <span>提供非技術人員使用的任務式後台，適合日常建立讀者、小說與章節。</span>
+        <strong>友善後台</strong>
+        <span>適合一般管理者的主要入口，包含閱讀者、小說、章節、anti7ocr 與浮水印工具。</span>
     </a>
     <a class="cr-admin-card" href="{% url 'admin-watermark-extract' %}">
-        <strong>浮水印提取工具</strong>
-        <span>上傳站內原圖或一般截圖，直接解析其中的 blind watermark。</span>
+        <strong>blind watermark 提取</strong>
+        <span>上傳原圖或截圖，查看提取結果、採用方法與過程紀錄。</span>
+    </a>
+    <a class="cr-admin-card" href="{% url 'admin-anti7ocr-diagnostics' %}">
+        <strong>anti7ocr 診斷</strong>
+        <span>輸入文字後跑 Tesseract OCR，檢查 CER 與 metadata。</span>
     </a>
     <a class="cr-admin-card" href="{% url 'admin:library_antiocrpreset_changelist' %}">
-        <strong>Anti-OCR 參數集</strong>
-        <span>集中調整桌機版、手機版字級與背景干擾強度。</span>
+        <strong>anti7ocr 設定</strong>
+        <span>查看或編輯 anti7ocr 參數，自訂字體請到友善後台字體庫管理。</span>
     </a>
     <a class="cr-admin-card" href="{% url 'admin:accounts_user_changelist' %}">
-        <strong>閱讀者與授權</strong>
-        <span>建立閱讀者，並設定全站、小說或章節授權。</span>
+        <strong>帳號與權限</strong>
+        <span>如需低頻維護或直接檢查模型資料，可由此進入。</span>
     </a>
 </div>
 <div id="content-main" class="app-list">
@@ -39,11 +43,10 @@
 <div id="content-related">
     <div class="module" id="recent-actions-module">
         <h2>最近操作</h2>
-        <h3>我的紀錄</h3>
-        {% load log %}
+        <h3>最近 10 筆</h3>
         {% get_admin_log 10 as admin_log for_user user %}
         {% if not admin_log %}
-            <p>目前沒有最近操作。</p>
+            <p>目前還沒有最近操作紀錄。</p>
         {% else %}
             <ul class="actionlist">
                 {% for entry in admin_log %}
@@ -57,7 +60,7 @@
                         {% if entry.content_type %}
                             <span class="mini quiet">{{ entry.content_type.name }}</span>
                         {% else %}
-                            <span class="mini quiet">未知內容</span>
+                            <span class="mini quiet">未知資料模型</span>
                         {% endif %}
                     </li>
                 {% endfor %}
