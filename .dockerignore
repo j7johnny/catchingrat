@@ -1,0 +1,13 @@
+.git
+.venv
+.venv312
+__pycache__
+*.pyc
+*.pyo
+*.sqlite3
+.pytest_cache
+.mypy_cache
+.ruff_cache
+htmlcov
+media
+staticfiles

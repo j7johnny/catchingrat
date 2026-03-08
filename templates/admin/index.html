@@ -1,0 +1,64 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrastyle %}
+{{ block.super }}
+<link rel="stylesheet" href="{% static "admin/css/dashboard.css" %}">
+{% endblock %}
+
+{% block coltype %}colMS{% endblock %}
+{% block bodyclass %}{{ block.super }} dashboard{% endblock %}
+{% block nav-breadcrumbs %}{% endblock %}
+{% block nav-sidebar %}{% endblock %}
+
+{% block content %}
+<div class="cr-admin-tools">
+    <a class="cr-admin-card" href="{% url 'admin-watermark-extract' %}">
+        <strong>浮水印提取工具</strong>
+        <span>上傳站內原圖或一般截圖，直接解析其中的 blind watermark。</span>
+    </a>
+    <a class="cr-admin-card" href="{% url 'admin:library_antiocrpreset_changelist' %}">
+        <strong>Anti-OCR 參數集</strong>
+        <span>集中調整桌機版、手機版字級與背景干擾強度。</span>
+    </a>
+    <a class="cr-admin-card" href="{% url 'admin:accounts_user_changelist' %}">
+        <strong>閱讀者與授權</strong>
+        <span>建立閱讀者，並設定全站、小說或章節授權。</span>
+    </a>
+</div>
+<div id="content-main" class="app-list">
+    {% include "admin/app_list.html" with app_list=app_list show_changelinks=True %}
+</div>
+{% endblock %}
+
+{% block sidebar %}
+<div id="content-related">
+    <div class="module" id="recent-actions-module">
+        <h2>最近操作</h2>
+        <h3>我的紀錄</h3>
+        {% load log %}
+        {% get_admin_log 10 as admin_log for_user user %}
+        {% if not admin_log %}
+            <p>目前沒有最近操作。</p>
+        {% else %}
+            <ul class="actionlist">
+                {% for entry in admin_log %}
+                    <li class="{% if entry.is_addition %}addlink{% endif %}{% if entry.is_change %}changelink{% endif %}{% if entry.is_deletion %}deletelink{% endif %}">
+                        {% if entry.is_deletion or not entry.get_admin_url %}
+                            {{ entry.object_repr }}
+                        {% else %}
+                            <a href="{{ entry.get_admin_url }}">{{ entry.object_repr }}</a>
+                        {% endif %}
+                        <br>
+                        {% if entry.content_type %}
+                            <span class="mini quiet">{{ entry.content_type.name }}</span>
+                        {% else %}
+                            <span class="mini quiet">未知內容</span>
+                        {% endif %}
+                    </li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

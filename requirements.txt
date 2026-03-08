@@ -1,0 +1,11 @@
+Django~=6.0
+psycopg[binary]~=3.3
+celery~=5.6
+redis~=7.3
+Pillow~=12.1
+argon2-cffi~=25.1
+django-redis~=6.0
+gunicorn~=25.1
+blind-watermark~=0.4.4
+requests~=2.32
+antiocr @ git+https://github.com/breezedeus/antiOCR.git@c80a11b79ff2e10200c12fb32500b8b3702de168

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}{{ novel.title }} | CatchingRat{% endblock %}
+
+{% block content %}
+<section class="stack">
+    <div class="chapter-hero">
+        <div>
+            <p class="eyebrow">章節列表</p>
+            <h2>{{ novel.title }}</h2>
+            {% if novel.description %}
+                <p class="subtle">{{ novel.description }}</p>
+            {% endif %}
+        </div>
+        <a href="{% url 'reader:library' %}" class="secondary-button">返回小說列表</a>
+    </div>
+    <div class="chapter-list">
+        {% for chapter in chapters %}
+            <a href="{% url 'reader:chapter-detail' chapter.id %}" class="chapter-link">
+                <span class="chapter-index">{{ chapter.sort_order|stringformat:"02d" }}</span>
+                <span>{{ chapter.title }}</span>
+            </a>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}
