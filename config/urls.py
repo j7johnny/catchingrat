@@ -14,6 +14,11 @@ urlpatterns = [
     path("admin/chapters/<int:pk>/publish", library_views.publish_chapter_view, name="admin-chapter-publish"),
     path("admin/anti7ocr/diagnostics/", library_views.anti7ocr_diagnostics_view, name="admin-anti7ocr-diagnostics"),
     path("admin/watermark/extract", library_views.watermark_extract_view, name="admin-watermark-extract"),
+    path(
+        "admin/visible-watermark/extract",
+        library_views.visible_watermark_extract_view,
+        name="admin-visible-watermark-extract",
+    ),
     path("admin/", admin.site.urls),
 ]
 

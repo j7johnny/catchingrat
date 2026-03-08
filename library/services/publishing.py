@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import contextlib
 from datetime import date, timedelta
+import os
+from pathlib import Path
+import tempfile
 
 from django.conf import settings
 from django.db import transaction
@@ -21,9 +24,10 @@ from .antiocr import (
 from .audit import log_event
 from .signing import build_signed_page_key
 from .storage import delete_relative_path, ensure_parent, media_relative
+from .visible_watermark import build_visible_watermark_payload, embed_visible_watermark
 from .watermark import build_watermark_payload, embed_watermark
 
-daily_page_layout_version = "v6"
+daily_page_layout_version = "v8"
 
 
 def _maybe_enqueue(task, *args, eager_mode: str = "skip"):
@@ -175,14 +179,29 @@ def build_daily_page(
     base_page = ensure_base_page(chapter_version, device_profile, page_index)
     relative_path = daily_page_relative_path(chapter_version.id, reader.id, for_date, device_profile, page_index)
     absolute_path = ensure_parent(relative_path)
-    payload = build_watermark_payload(reader.reader_id, for_date)
-    embed_watermark(
-        str(base_page.absolute_path),
-        str(absolute_path),
-        payload,
-        expected_reader_id=reader.reader_id,
-        expected_yyyymmdd=for_date.strftime("%Y%m%d"),
-    )
+    blind_payload = build_watermark_payload(reader.reader_id, for_date)
+    visible_payload = build_visible_watermark_payload(reader.reader_id, for_date)
+    file_descriptor, temp_name = tempfile.mkstemp(suffix=".png")
+    temp_path = Path(temp_name)
+    try:
+        embed_visible_watermark(
+            str(base_page.absolute_path),
+            str(temp_path),
+            visible_payload,
+            device_profile=device_profile,
+        )
+        embed_watermark(
+            str(temp_path),
+            str(absolute_path),
+            blind_payload,
+            expected_reader_id=reader.reader_id,
+            expected_yyyymmdd=for_date.strftime("%Y%m%d"),
+        )
+    finally:
+        with contextlib.suppress(OSError):
+            os.close(file_descriptor)
+        with contextlib.suppress(FileNotFoundError):
+            temp_path.unlink()
 
     if page and page.relative_path != relative_path:
         delete_relative_path(page.relative_path)

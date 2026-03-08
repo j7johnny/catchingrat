@@ -44,6 +44,6 @@ def cleanup_daily_cache_task() -> int:
 
 
 @shared_task
-def run_watermark_extraction_task(record_id: int) -> int:
-    record = process_extraction_record(record_id)
+def run_watermark_extraction_task(record_id: int, kind: str | None = None) -> int:
+    record = process_extraction_record(record_id, kind=kind)
     return record.id

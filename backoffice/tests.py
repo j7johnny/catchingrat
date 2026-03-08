@@ -1,14 +1,22 @@
+from pathlib import Path
+from unittest import skipUnless
+from unittest.mock import patch
+
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.utils import timezone
-from pathlib import Path
-from unittest.mock import patch
 
 from accounts.models import User
 from library.models import AntiOcrPreset, Chapter, CustomFontUpload, Novel, ReaderChapterGrant, ReaderNovelGrant, WatermarkExtractionRecord
 from library.services.antiocr import get_default_preset
 from library.services.publishing import build_daily_page, publish_chapter
-from testsupport import build_long_chinese_text, cleanup_temp_media_root, find_font_or_skip, make_temp_media_root
+from testsupport import (
+    build_long_chinese_text,
+    cleanup_temp_media_root,
+    find_font_or_skip,
+    has_tesseract,
+    make_temp_media_root,
+)
 
 TEST_PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
@@ -112,7 +120,7 @@ class BackofficeFlowTests(TestCase):
 
     def test_admin_can_create_and_publish_chapter_from_backoffice(self):
         admin = self.create_admin()
-        novel = Novel.objects.create(title="測試小說", slug="backoffice-novel")
+        novel = Novel.objects.create(title="後台測試小說", slug="backoffice-novel")
         self.client.force_login(admin)
 
         response = self.client.post(
@@ -139,7 +147,7 @@ class BackofficeFlowTests(TestCase):
     def test_backoffice_watermark_extract_tool_can_read_daily_page(self):
         admin = self.create_admin()
         reader = User.objects.create_user(username="reader01", password="ReaderPass123!")
-        novel = Novel.objects.create(title="測試小說", slug="extract-novel")
+        novel = Novel.objects.create(title="Blind 提取測試小說", slug="extract-novel")
         chapter = Chapter.objects.create(
             novel=novel,
             title="第一章",
@@ -171,6 +179,42 @@ class BackofficeFlowTests(TestCase):
         self.assertEqual(record.parsed_yyyymmdd, today.strftime("%Y%m%d"))
         self.assertGreater(len(record.process_log), 1)
 
+    @skipUnless(has_tesseract(), "Tesseract is required for visible watermark extraction tests.")
+    def test_backoffice_visible_watermark_extract_tool_can_read_daily_page(self):
+        admin = self.create_admin()
+        reader = User.objects.create_user(username="reader01", password="ReaderPass123!")
+        novel = Novel.objects.create(title="可見提取測試小說", slug="visible-extract-novel")
+        chapter = Chapter.objects.create(
+            novel=novel,
+            title="第一章",
+            slug="chapter-1",
+            sort_order=1,
+            content=build_long_chinese_text(paragraphs=4, repeats=8),
+        )
+        version = publish_chapter(chapter, actor=admin)
+        today = timezone.localdate()
+        page = build_daily_page(version, reader, today, "desktop", 1)
+
+        self.client.force_login(admin)
+        response = self.client.post(
+            "/manage/tools/visible-watermark-extract/",
+            {
+                "image": SimpleUploadedFile("page.png", page.absolute_path.read_bytes(), content_type="image/png"),
+            },
+            follow=False,
+        )
+
+        record = WatermarkExtractionRecord.objects.latest("id")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], f"/manage/tools/visible-watermark-extract/{record.id}/")
+
+        record.refresh_from_db()
+        self.assertEqual(record.status, WatermarkExtractionRecord.Status.SUCCEEDED)
+        self.assertTrue(record.is_valid)
+        self.assertEqual(record.parsed_reader_id, "reader01")
+        self.assertEqual(record.parsed_yyyymmdd, today.strftime("%Y%m%d"))
+        self.assertIn("visible", record.selected_method)
+
     def test_admin_can_open_anti7ocr_diagnostics_page(self):
         admin = self.create_admin()
         get_default_preset()
@@ -186,11 +230,11 @@ class BackofficeFlowTests(TestCase):
         preset = get_default_preset()
         self.client.force_login(admin)
 
-        with patch("backoffice.views.run_diagnostics") as run_diagnostics:
-            run_diagnostics.return_value = {
+        with patch("backoffice.views.run_diagnostics") as mocked_run_diagnostics:
+            mocked_run_diagnostics.return_value = {
                 "seed": 1234,
                 "image_url": "/media/anti7ocr_diagnostics/example.png",
-                "recognized_text": "測試輸出",
+                "recognized_text": "測試辨識文字",
                 "cer": 0.25,
                 "avg_cer": {"tesseract": 0.25},
                 "metadata": {"line_count": 3},
@@ -200,26 +244,26 @@ class BackofficeFlowTests(TestCase):
             response = self.client.post(
                 "/manage/tools/anti7ocr-diagnostics/",
                 {
-                    "text": "這是一段 anti7ocr 診斷測試文字。",
+                    "text": "這是一段用於 anti7ocr 診斷的測試文字。",
                     "preset": str(preset.id),
                     "device_profile": "desktop",
                     "seed": "1234",
-                    "sensitive_keywords": "機密詞",
+                    "sensitive_keywords": "測試關鍵字",
                 },
                 follow=True,
             )
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "CER 0.2500")
-        self.assertContains(response, "測試輸出")
-        run_diagnostics.assert_called_once()
+        self.assertContains(response, "測試辨識文字")
+        mocked_run_diagnostics.assert_called_once()
 
     def test_admin_can_preview_anti7ocr_preset_before_save(self):
         admin = self.create_admin()
         self.client.force_login(admin)
 
-        with patch("backoffice.views.generate_preview") as generate_preview:
-            generate_preview.return_value = {
+        with patch("backoffice.views.generate_preview") as mocked_generate_preview:
+            mocked_generate_preview.return_value = {
                 "seed": 4321,
                 "image_url": "/media/anti7ocr_previews/example.png",
                 "relative_path": "anti7ocr_previews/example.png",
@@ -227,10 +271,10 @@ class BackofficeFlowTests(TestCase):
             response = self.client.post(
                 "/manage/settings/anti-ocr/new/",
                 {
-                    "name": "預覽用設定",
+                    "name": "測試設定",
                     "is_default": "",
                     "base_preset_name": "tw_readable",
-                    "preview_text": "這是一段預覽測試文字。",
+                    "preview_text": "這是一段示範圖片測試文字。",
                     "preview_device_profile": "desktop",
                     "action": "preview",
                 },
@@ -240,8 +284,8 @@ class BackofficeFlowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "anti7ocr_previews/example.png")
         self.assertFalse(CustomFontUpload.objects.exists())
-        self.assertFalse(AntiOcrPreset.objects.filter(name="預覽用設定").exists())
-        generate_preview.assert_called_once()
+        self.assertFalse(AntiOcrPreset.objects.filter(name="測試設定").exists())
+        mocked_generate_preview.assert_called_once()
 
     def test_admin_can_upload_custom_font(self):
         admin = self.create_admin()

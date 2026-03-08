@@ -14,24 +14,28 @@
 {% block content %}
 <div class="cr-admin-tools">
     <a class="cr-admin-card" href="{% url 'backoffice:dashboard' %}">
-        <strong>友善後台</strong>
-        <span>適合一般管理者的主要入口，包含閱讀者、小說、章節、anti7ocr 與浮水印工具。</span>
+        <strong>友善管理後台</strong>
+        <span>給日常管理者使用的小說、章節、閱讀者與工具入口。</span>
     </a>
     <a class="cr-admin-card" href="{% url 'admin-watermark-extract' %}">
-        <strong>blind watermark 提取</strong>
-        <span>上傳原圖或截圖，查看提取結果、採用方法與過程紀錄。</span>
+        <strong>Blind Watermark 提取</strong>
+        <span>上傳原圖、截圖或長截圖，執行 blind watermark 追查。</span>
+    </a>
+    <a class="cr-admin-card" href="{% url 'admin-visible-watermark-extract' %}">
+        <strong>可見浮水印提取</strong>
+        <span>先做影像顯影，再以 OCR 解析 reader_id 與日期。</span>
     </a>
     <a class="cr-admin-card" href="{% url 'admin-anti7ocr-diagnostics' %}">
         <strong>anti7ocr 診斷</strong>
-        <span>輸入文字後跑 Tesseract OCR，檢查 CER 與 metadata。</span>
+        <span>產生示範圖，並直接查看 OCR 與 CER 結果。</span>
     </a>
     <a class="cr-admin-card" href="{% url 'admin:library_antiocrpreset_changelist' %}">
         <strong>anti7ocr 設定</strong>
-        <span>查看或編輯 anti7ocr 參數，自訂字體請到友善後台字體庫管理。</span>
+        <span>進階調整桌機、手機輸出與各項防 OCR 參數。</span>
     </a>
     <a class="cr-admin-card" href="{% url 'admin:accounts_user_changelist' %}">
-        <strong>帳號與權限</strong>
-        <span>如需低頻維護或直接檢查模型資料，可由此進入。</span>
+        <strong>帳號管理</strong>
+        <span>查看所有管理者與閱讀者資料，做進階維護。</span>
     </a>
 </div>
 <div id="content-main" class="app-list">
@@ -42,11 +46,11 @@
 {% block sidebar %}
 <div id="content-related">
     <div class="module" id="recent-actions-module">
-        <h2>最近操作</h2>
+        <h2>最近動作</h2>
         <h3>最近 10 筆</h3>
         {% get_admin_log 10 as admin_log for_user user %}
         {% if not admin_log %}
-            <p>目前還沒有最近操作紀錄。</p>
+            <p>目前尚無管理紀錄。</p>
         {% else %}
             <ul class="actionlist">
                 {% for entry in admin_log %}
@@ -60,7 +64,7 @@
                         {% if entry.content_type %}
                             <span class="mini quiet">{{ entry.content_type.name }}</span>
                         {% else %}
-                            <span class="mini quiet">未知資料模型</span>
+                            <span class="mini quiet">未知內容</span>
                         {% endif %}
                     </li>
                 {% endfor %}

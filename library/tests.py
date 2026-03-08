@@ -1,5 +1,6 @@
 from datetime import timedelta
 from io import BytesIO
+from unittest import skipUnless
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -17,6 +18,7 @@ from library.services.publishing import (
     publish_chapter,
     render_base_pages_for_version,
 )
+from library.services.visible_watermark import extract_visible_watermark_from_bytes
 from library.services.watermark import (
     build_recovery_context,
     extract_watermark,
@@ -24,7 +26,13 @@ from library.services.watermark import (
     extract_watermark_from_bytes,
     recover_candidate_payload,
 )
-from testsupport import build_long_chinese_text, cleanup_temp_media_root, find_font_or_skip, make_temp_media_root
+from testsupport import (
+    build_long_chinese_text,
+    cleanup_temp_media_root,
+    find_font_or_skip,
+    has_tesseract,
+    make_temp_media_root,
+)
 
 TEST_PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
@@ -287,3 +295,37 @@ class RenderingFlowTests(TestCase):
         self.assertEqual(result["parsed"]["reader_id"], "reader01")
         self.assertEqual(result["parsed"]["yyyymmdd"], today.strftime("%Y%m%d"))
         self.assertIn("source_match", {entry["stage"] for entry in result["trace"]})
+
+    @skipUnless(has_tesseract(), "Tesseract is required for visible watermark extraction tests.")
+    def test_visible_watermark_extracts_from_original_daily_page(self):
+        version = publish_chapter(self.chapter, actor=self.admin)
+        today = timezone.localdate()
+        page = build_daily_page(version, self.reader, today, DeviceProfile.DESKTOP, 1)
+
+        result = extract_visible_watermark_from_bytes(page.absolute_path.read_bytes())
+
+        self.assertTrue(result["is_valid"])
+        self.assertEqual(result["parsed"]["reader_id"], "reader01")
+        self.assertEqual(result["parsed"]["yyyymmdd"], today.strftime("%Y%m%d"))
+        self.assertIn("ocr", {entry["stage"] for entry in result["trace"]})
+
+    @skipUnless(has_tesseract(), "Tesseract is required for visible watermark extraction tests.")
+    def test_visible_watermark_extracts_from_stitched_crop(self):
+        self._stretch_chapter_content()
+        version = publish_chapter(self.chapter, actor=self.admin)
+        today = timezone.localdate()
+        page_one = build_daily_page(version, self.reader, today, DeviceProfile.DESKTOP, 1)
+        page_two = build_daily_page(version, self.reader, today, DeviceProfile.DESKTOP, 2)
+
+        with Image.open(page_one.absolute_path) as image_one:
+            crop_top = max(0, image_one.height - 160)
+        crop_bytes = self._build_stitched_crop_bytes(
+            [page_one.absolute_path, page_two.absolute_path],
+            crop_box=(24, crop_top, 580, crop_top + 420),
+        )
+        result = extract_visible_watermark_from_bytes(crop_bytes)
+
+        self.assertTrue(result["is_valid"])
+        self.assertEqual(result["parsed"]["reader_id"], "reader01")
+        self.assertEqual(result["parsed"]["yyyymmdd"], today.strftime("%Y%m%d"))
+        self.assertIn("window", {entry["stage"] for entry in result["trace"]})

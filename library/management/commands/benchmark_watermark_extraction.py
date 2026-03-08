@@ -10,6 +10,7 @@ from django.utils import timezone
 from PIL import Image
 
 from library.models import DailyPageCache, DeviceProfile
+from library.services.visible_watermark import extract_visible_watermark_from_bytes
 from library.services.watermark import extract_watermark_from_bytes
 
 
@@ -30,8 +31,14 @@ def stitch_page_paths(page_paths: list[str]) -> Image.Image:
             image.close()
 
 
+def extract_with_kind(extractor_kind: str, image_bytes: bytes) -> dict:
+    if extractor_kind == "visible":
+        return extract_visible_watermark_from_bytes(image_bytes)
+    return extract_watermark_from_bytes(image_bytes)
+
+
 class Command(BaseCommand):
-    help = "Benchmark watermark extraction with 1-3 stitched page screenshots and random crops."
+    help = "Benchmark blind/visible watermark extraction with 1-3 stitched page screenshots and random crops."
 
     def add_arguments(self, parser):
         parser.add_argument("--reader", required=True, help="Reader username.")
@@ -42,6 +49,7 @@ class Command(BaseCommand):
         parser.add_argument("--max-pages", type=int, default=3)
         parser.add_argument("--seed", type=int, default=20260309)
         parser.add_argument("--json", dest="json_output", action="store_true")
+        parser.add_argument("--extractor", choices=["blind", "visible", "both"], default="both")
 
     def handle(self, *args, **options):
         for_date = timezone.localdate()
@@ -82,74 +90,86 @@ class Command(BaseCommand):
         if not any(bundles_by_count.values()):
             raise CommandError("No consecutive daily page bundles were found.")
 
+        extractor_kinds = ["blind", "visible"] if options["extractor"] == "both" else [options["extractor"]]
         rng = random.Random(options["seed"])
         report = []
-        for page_count in range(1, options["max_pages"] + 1):
-            bundles = bundles_by_count.get(page_count, [])
-            if not bundles:
-                continue
+        for extractor_kind in extractor_kinds:
+            extractor_report = {"extractor": extractor_kind, "sections": []}
+            for page_count in range(1, options["max_pages"] + 1):
+                bundles = bundles_by_count.get(page_count, [])
+                if not bundles:
+                    continue
 
-            trial_results = []
-            for trial_index in range(options["trials_per_count"]):
-                bundle = rng.choice(bundles)
-                stitched = stitch_page_paths([str(page.absolute_path) for page in bundle])
-                try:
-                    min_width = max(220, int(stitched.width * 0.58))
-                    min_height = max(180, int(stitched.height * 0.28))
-                    crop_width = rng.randint(min_width, stitched.width)
-                    crop_height = rng.randint(min_height, stitched.height)
-                    x = rng.randint(0, max(0, stitched.width - crop_width))
-                    y = rng.randint(0, max(0, stitched.height - crop_height))
-                    crop = stitched.crop((x, y, x + crop_width, y + crop_height))
-                    buffer = BytesIO()
-                    crop.save(buffer, format="PNG")
-                    result = extract_watermark_from_bytes(buffer.getvalue())
-                finally:
-                    stitched.close()
+                trial_results = []
+                for trial_index in range(options["trials_per_count"]):
+                    bundle = rng.choice(bundles)
+                    stitched = stitch_page_paths([str(page.absolute_path) for page in bundle])
+                    try:
+                        min_width = max(220, int(stitched.width * 0.58))
+                        min_height = max(180, int(stitched.height * 0.28))
+                        crop_width = rng.randint(min_width, stitched.width)
+                        crop_height = rng.randint(min_height, stitched.height)
+                        x = rng.randint(0, max(0, stitched.width - crop_width))
+                        y = rng.randint(0, max(0, stitched.height - crop_height))
+                        crop = stitched.crop((x, y, x + crop_width, y + crop_height))
+                        buffer = BytesIO()
+                        crop.save(buffer, format="PNG")
+                        result = extract_with_kind(extractor_kind, buffer.getvalue())
+                    finally:
+                        stitched.close()
 
-                trial_results.append(
+                    trial_results.append(
+                        {
+                            "trial": trial_index + 1,
+                            "page_count": page_count,
+                            "crop_box": [x, y, x + crop_width, y + crop_height],
+                            "chapter_version_id": bundle[0].chapter_version_id,
+                            "page_indexes": [page.page_index for page in bundle],
+                            "is_valid": result["is_valid"],
+                            "reader_id": result["parsed"]["reader_id"] if result["parsed"] else "",
+                            "yyyymmdd": result["parsed"]["yyyymmdd"] if result["parsed"] else "",
+                            "selected_method": result["selected_method"],
+                            "duration_ms": result["duration_ms"],
+                            "attempt_count": result["attempt_count"],
+                        }
+                    )
+
+                successes = [item for item in trial_results if item["is_valid"]]
+                extractor_report["sections"].append(
                     {
-                        "trial": trial_index + 1,
                         "page_count": page_count,
-                        "crop_box": [x, y, x + crop_width, y + crop_height],
-                        "chapter_version_id": bundle[0].chapter_version_id,
-                        "page_indexes": [page.page_index for page in bundle],
-                        "is_valid": result["is_valid"],
-                        "reader_id": result["parsed"]["reader_id"] if result["parsed"] else "",
-                        "yyyymmdd": result["parsed"]["yyyymmdd"] if result["parsed"] else "",
-                        "selected_method": result["selected_method"],
-                        "duration_ms": result["duration_ms"],
-                        "attempt_count": result["attempt_count"],
+                        "trial_count": len(trial_results),
+                        "success_count": len(successes),
+                        "success_rate": round(len(successes) / len(trial_results), 4),
+                        "avg_duration_ms": round(
+                            sum(item["duration_ms"] for item in trial_results) / len(trial_results),
+                            2,
+                        ),
+                        "avg_attempt_count": round(
+                            sum(item["attempt_count"] for item in trial_results) / len(trial_results),
+                            2,
+                        ),
+                        "trials": trial_results,
                     }
                 )
-
-            successes = [item for item in trial_results if item["is_valid"]]
-            report.append(
-                {
-                    "page_count": page_count,
-                    "trial_count": len(trial_results),
-                    "success_count": len(successes),
-                    "success_rate": round(len(successes) / len(trial_results), 4),
-                    "avg_duration_ms": round(sum(item["duration_ms"] for item in trial_results) / len(trial_results), 2),
-                    "avg_attempt_count": round(sum(item["attempt_count"] for item in trial_results) / len(trial_results), 2),
-                    "trials": trial_results,
-                }
-            )
+            report.append(extractor_report)
 
         if options["json_output"]:
             self.stdout.write(json.dumps(report, ensure_ascii=False, indent=2))
             return
 
-        for section in report:
-            self.stdout.write(
-                self.style.SUCCESS(
-                    f"{section['page_count']} page(s): {section['success_count']}/{section['trial_count']} "
-                    f"success, avg {section['avg_duration_ms']} ms, avg attempts {section['avg_attempt_count']}"
-                )
-            )
-            for trial in section["trials"]:
-                status = "OK" if trial["is_valid"] else "FAIL"
+        for extractor_report in report:
+            self.stdout.write(self.style.MIGRATE_HEADING(f"Extractor: {extractor_report['extractor']}"))
+            for section in extractor_report["sections"]:
                 self.stdout.write(
-                    f"  - trial {trial['trial']}: {status}, pages={trial['page_indexes']}, "
-                    f"method={trial['selected_method'] or 'none'}, duration={trial['duration_ms']} ms"
+                    self.style.SUCCESS(
+                        f"{section['page_count']} page(s): {section['success_count']}/{section['trial_count']} "
+                        f"success, avg {section['avg_duration_ms']} ms, avg attempts {section['avg_attempt_count']}"
+                    )
                 )
+                for trial in section["trials"]:
+                    status = "OK" if trial["is_valid"] else "FAIL"
+                    self.stdout.write(
+                        f"  - trial {trial['trial']}: {status}, pages={trial['page_indexes']}, "
+                        f"method={trial['selected_method'] or 'none'}, duration={trial['duration_ms']} ms"
+                    )

@@ -1,11 +1,12 @@
-# CatchingRat 人工驗收指南
+# CatchingRat 人工驗收操作手冊
 
-這份文件用來手動驗收目前版本的 4 個重點：
+這份文件以「系統已被清回首次啟動狀態」為前提撰寫。  
+也就是說：
 
-1. 章節發布必須等桌機版與手機版基底圖都產生完成，讀者才看得到。
-2. `anti7ocr` 設定頁已改成較易懂的分組式表單，且可直接產生示範圖片。
-3. 後台可上傳客製字體，並讓 `anti7ocr` 正式發布與示範圖共用。
-4. blind watermark 提取可先做全圖，再做大量裁切搜尋，且會留下過程紀錄。
+- 沒有任何現成管理者
+- 沒有任何閱讀者
+- 沒有任何小說與章節
+- 你需要從 `/setup/` 開始建立第一位管理者
 
 ## 1. 啟動服務
 
@@ -25,7 +26,7 @@ docker compose up -d
 docker compose ps
 ```
 
-預期容器：
+預期：
 
 - `web`
 - `worker`
@@ -34,125 +35,79 @@ docker compose ps
 - `postgres`
 - `redis`
 
-全部都應為 `Up`。
+都顯示 `Up`。
 
 網站入口：
 
-- 首頁：[http://localhost:18080/](http://localhost:18080/)
+- 首次啟動：[http://localhost:18080/setup/](http://localhost:18080/setup/)
+- 登入頁：[http://localhost:18080/login](http://localhost:18080/login)
 - 管理後台：[http://localhost:18080/manage/](http://localhost:18080/manage/)
-- Django admin：[http://localhost:18080/admin/](http://localhost:18080/admin/)
 
-## 2. 首次開站或既有環境
-
-### 如果是全新環境
+## 2. 建立第一位管理者
 
 1. 打開 [http://localhost:18080/setup/](http://localhost:18080/setup/)
-2. 建立第一位管理者
-3. 完成後應自動進入 `/manage/`
+2. 建立第一位管理者帳號
+3. 建立完成後應自動可登入後台
 4. 再次打開 `/setup/` 應回 `404`
 
-### 如果已經有管理者
+驗收重點：
 
-1. 打開 [http://localhost:18080/login](http://localhost:18080/login)
-2. 以管理者帳號登入
-3. 應自動導向 [http://localhost:18080/manage/](http://localhost:18080/manage/)
+- 第一次可正常建立管理者
+- 建立後 `/setup/` 會永久關閉
 
-## 3. 管理後台整體驗收
+## 3. 管理後台整體導覽
 
-### 3.1 儀表板
+管理者登入後，先確認以下頁面都可正常打開：
 
-進入 `/manage/` 後檢查：
+- `/manage/`
+- `/manage/readers/`
+- `/manage/novels/`
+- `/manage/settings/anti-ocr/`
+- `/manage/settings/anti-ocr/fonts/`
+- `/manage/tools/anti7ocr-diagnostics/`
+- `/manage/tools/watermark-extract/`
+- `/manage/tools/visible-watermark-extract/`
 
-- 側邊欄有固定的 5 個入口：
-  - 管理首頁
-  - 閱讀者管理
-  - 小說與章節
-  - anti7ocr 設定
-  - 工具
-- 頁面右下角或頁尾顯示版本號
-- 側邊欄顯示字體庫摘要
-- 有 Django admin 備援連結
+驗收重點：
 
-### 3.2 閱讀者管理
+- 沒有 `403`
+- 沒有 `500`
+- 頁面可正常顯示表單與按鈕
 
-進入 `/manage/readers/`：
+## 4. 檢查 anti7ocr 預設參數
 
-1. 新增一個閱讀者
-2. 設定密碼
-3. 檢查同一頁可直接設定三層授權：
-   - 全站授權
-   - 指定小說授權
-   - 指定章節授權
-4. 儲存後再次進入該閱讀者頁面，確認資料仍存在
+打開 [http://localhost:18080/manage/settings/anti-ocr/](http://localhost:18080/manage/settings/anti-ocr/)
 
-預期：
+確認預設 preset 方向：
 
-- 頁面文字以繁中顯示
-- 欄位分組清楚
-- 密碼、啟用狀態、授權都在同頁完成
+- `base preset` 為 `tw_readable`
+- 不使用「部分字元轉拼音」
+- 不使用「中文字倒轉／旋轉」
+- Desktop 寬度為 `600`
+- Mobile 寬度為 `420`
+- 輸出格式為 `PNG`
 
-## 4. anti7ocr 設定頁驗收
+## 5. 產生 anti7ocr 示範圖片
 
-進入 [http://localhost:18080/manage/settings/anti-ocr/](http://localhost:18080/manage/settings/anti-ocr/)
+進入 anti7ocr 設定頁或診斷頁：
 
-### 4.1 設定列表
-
-檢查：
-
-- 看到設定卡片而不是難懂的原始模型列表
-- 每張卡片可看出是否為預設
-- 可直接進入編輯頁
-- 可看到字體庫入口
-
-### 4.2 設定編輯頁
-
-打開任一設定或新增設定，檢查分組區塊是否清楚：
-
-- 基本資料
-- 文字保護
-- 桌機版面
-- 手機版面
-- 背景與色彩
-- 碎裂效果
-- 細部擾動
-- 輸出
-
-檢查以下預設值是否合理：
-
-- `base preset = tw_readable`
-- `啟用局部拼音 = 關閉`
-- `拼音比例 = 0`
-- `啟用倒字/翻轉 = 關閉`
-- `倒字比例 = 0`
-- `桌機寬度 = 600`
-- `手機寬度 = 420`
-- `桌機字級 = 22 ~ 28`
-- `手機字級 = 20 ~ 24`
-- `輸出格式 = PNG`
-
-### 4.3 產生示範圖片
-
-在 anti7ocr 設定編輯頁：
-
-1. 只修改少量欄位，例如：
-   - 設定名稱
-   - 基底 preset
-   - 示範文字
-   - 示範裝置
-2. 按 `產生示範圖片`
+1. 輸入一段 100 字以上繁中內容
+2. 選擇 preset
+3. 分別測一次 `desktop` 與 `mobile`
+4. 送出
 
 預期：
 
-- 頁面不會因未填滿所有細部欄位而報錯
-- 右側會顯示示範圖片
-- 會顯示 seed
-- 不會因為只做預覽就真的新增一份 preset
+- 成功產生示範圖片
+- 顯示 OCR 結果
+- 顯示 CER
+- 可以看出這是一張 anti7ocr 生成圖
 
-## 5. 客製字體上傳驗收
+## 6. 上傳客製字體
 
-進入 [http://localhost:18080/manage/settings/anti-ocr/fonts/](http://localhost:18080/manage/settings/anti-ocr/fonts/)
+打開 [http://localhost:18080/manage/settings/anti-ocr/fonts/](http://localhost:18080/manage/settings/anti-ocr/fonts/)
 
-準備一個字體檔，例如：
+建議使用：
 
 - `ttf`
 - `otf`
@@ -161,231 +116,197 @@ docker compose ps
 
 操作：
 
-1. 填入字體名稱
-2. 上傳字體檔
-3. 保持 `立即啟用` 勾選
-4. 送出
-
-預期：
-
-- 上傳成功後回到字體列表
-- 該字體顯示為啟用中
-- 之後在 anti7ocr 設定頁右側可看到它出現在目前可用字體列表
-
-可再做一次：
-
-1. 按停用
-2. 再按啟用
-3. 最後按刪除
-
-預期：
-
-- 三個動作都能成功
-- 字體摘要數量會跟著更新
-
-## 6. 發布流程驗收
-
-這一段用來驗證「先產出基底圖，完成後才算發布」。
-
-### 6.1 建立小說
-
-進入 `/manage/novels/`：
-
-1. 新增小說
-2. 填入：
-   - 小說名稱
-   - 小說代稱
-   - 簡介
+1. 輸入字體名稱
+2. 上傳字型檔
 3. 儲存
-
-### 6.2 建立章節草稿
-
-在小說頁：
-
-1. 新增章節
-2. 填入：
-   - 章節名稱
-   - 章節代稱
-   - 排序
-   - 章節全文
-   - anti7ocr 設定
-3. 先按 `儲存草稿`
+4. 回到 anti7ocr 預設頁，確認可選到這個字體
 
 預期：
 
-- 章節狀態仍是草稿
-- 讀者尚不可見
+- 字體上傳成功
+- 後續預設與診斷頁可選用該字體
 
-### 6.3 正式發布
+## 7. 建立小說
 
-在章節編輯頁按 `立即發布`
+打開 `/manage/novels/`
+
+1. 建立新小說
+2. 填寫標題
+3. 填寫 slug
+4. 可選填簡介
+5. 儲存
 
 預期：
 
-- 頁面會等待發布完成
-- 成功訊息應明確提到：
-  - 桌機基底圖已完成
-  - 手機基底圖已完成
-  - 讀者現在才會看到
-- 章節狀態變為已發布
-- `current_version` 已建立
+- 小說建立成功
+- 可進入該小說詳情頁
 
-驗證方式：
+## 8. 建立章節並發布
 
-1. 發布完成前不要讓讀者刷新該小說頁
-2. 發布成功後再用讀者登入檢查
-3. 讀者應只會看到已完成發布的內容
+在小說詳情頁中新增章節：
 
-## 7. 讀者端驗收
+1. 建立章節
+2. 填寫標題、slug、排序
+3. 貼入長文本
+   - 建議至少 1200 字以上
+   - 建議用足夠長的內容，方便測多頁圖片與截圖提取
+4. 選擇 anti7ocr preset
+5. 先按一次「儲存草稿」
+6. 再按一次「立即發布」
 
-### 7.1 書庫層級
+驗收重點：
 
-以閱讀者登入後檢查：
+- 發布不是瞬間完成，而是等基底圖產完後才算發布成功
+- 發布完成前，讀者不應看到該章節
+- 發布完成後，章節應可被授權閱讀
 
-- 書庫先顯示「小說」
-- 點進小說後才看到章節
-- 不再把所有小說與章節擠在同一頁
+## 9. 新增閱讀者並設定授權
 
-### 7.2 章節閱讀體驗
+打開 `/manage/readers/`
 
-打開任一已授權章節後檢查：
+建立一個測試閱讀者，例如：
 
-- 一開始有 Loading 畫面
-- 圖片是連續流式閱讀，切片之間沒有明顯縫隙
-- 快速往下拉時，後續圖片仍會持續補載
-- 若還沒載完，頁尾會持續顯示載入中的提示
-- 頁底有置中的：
-  - 上一章
-  - 下一章
-  - 回章節列表
+- 帳號：`reader01`
+- 密碼：你自己設定
 
-### 7.3 前端基本防下載
-
-在章節閱讀頁檢查：
-
-- 圖片右鍵功能被阻擋
-- 圖片不可拖曳
-- `Ctrl+S` / `Ctrl+P` / `Ctrl+U` 有基本阻擋
-
-注意：
-
-- 這只是基本防護，不代表能防止截圖
-
-## 8. 授權驗收
-
-請用同一位閱讀者分 3 次測試：
+授權請至少驗證三種情境：
 
 ### A. 全站授權
 
-- 應能看到全部已發布小說與章節
+- 勾選全站授權
+- 閱讀者應能看到全部小說與章節
 
 ### B. 指定小說授權
 
-- 只能看到被授權小說
-- 同小說內已發布章節可見
+- 取消全站授權
+- 只勾某一本小說
+- 閱讀者只能看到那本小說
 
 ### C. 指定章節授權
 
-- 只能看到被授權章節
-- 未授權章節不可直接打開
+- 取消小說授權
+- 只勾某一章
+- 閱讀者只看到那一章
 
-## 9. blind watermark 提取驗收
+## 10. 讀者端閱讀驗收
 
-進入 [http://localhost:18080/manage/tools/watermark-extract/](http://localhost:18080/manage/tools/watermark-extract/)
+閱讀者登入後：
 
-### 9.1 原圖提取
+1. 應先看到「小說列表」
+2. 點入小說後才看到章節列表
+3. 點入章節時要先看到 Loading
+4. 圖片應逐步載入
+5. 若尚未載完，頁面底部應有持續載入提示
+6. 按鈕「上一章 / 下一章 / 回章節列表」應可使用
 
-1. 以閱讀者打開章節
-2. 取得其中一張站內原圖
-3. 上傳到提取工具
+驗收重點：
 
-預期：
+- 圖片之間應接近無縫連續閱讀
+- 快速往下捲不應卡死
+- 回到書庫不應異常變慢
+- 同章節同日重開應比首次更快
 
-- 先做全圖提取
-- 能得到：
-  - `reader_id`
-  - `yyyymmdd`
-- 紀錄中可看到執行過程
+## 11. 閱讀防下載基本保護
 
-### 9.2 單張截圖提取
+在章節閱讀頁驗收：
 
-1. 對閱讀頁中的單張圖片做截圖
-2. 上傳到提取工具
-
-預期：
-
-- 若全圖失敗，系統會改做多次區塊裁切嘗試
-- 成功時仍能提取出 `reader_id|yyyymmdd`
-
-### 9.3 長截圖提取
-
-1. 對連續多張圖片做長截圖
-2. 上傳到提取工具
+- 右鍵圖片
+- 嘗試拖曳圖片
+- 嘗試 `Ctrl+S`
+- 嘗試 `Ctrl+P`
+- 嘗試 `Ctrl+U`
 
 預期：
 
-- 系統仍會嘗試從多個局部區塊中找可提取區域
-- 成功時仍能解析出正確結果
+- 會有基本阻擋
+- 但這不是絕對防護，只是降低直接下載難度
 
-### 9.4 提取紀錄
+## 12. blind watermark 提取驗收
 
-打開任一提取紀錄頁，檢查：
+打開 [http://localhost:18080/manage/tools/watermark-extract/](http://localhost:18080/manage/tools/watermark-extract/)
 
-- 有狀態：
-  - pending
-  - running
-  - succeeded / failed
-- 有方法名稱
-- 有耗時
-- 有過程 log
-- 有最終解析出的帳號與日期
+建議做兩種測試：
 
-## 10. 回歸驗收
+### A. 原圖測試
 
-### 10.1 Django admin 備援入口
-
-進入 `/admin/`：
-
-- 管理者可登入
-- 能看到 anti7ocr 設定模型
-- 能看到字體上傳模型
-- 能看到浮水印提取相關資料
-
-### 10.2 修改密碼
-
-以管理者或閱讀者測試：
-
-1. 進入修改密碼頁
-2. 修改後重新登入
+1. 在閱讀頁打開某張 PNG
+2. 直接另存那張圖片
+3. 回後台上傳到 blind watermark 提取工具
 
 預期：
 
-- 新密碼可登入
+- 能提取出 `reader_id|yyyymmdd`
+- 頁面會顯示提取過程與結果
+
+### B. 長截圖測試
+
+1. 在閱讀頁讓 2 到 3 張圖片連續顯示
+2. 用截圖工具做一張長截圖
+3. 上傳到 blind watermark 提取工具
+
+預期：
+
+- 在近期快取仍存在時，應能提取成功
+- 頁面會顯示使用了哪種方法
+
+## 13. 可見浮水印提取驗收
+
+打開 [http://localhost:18080/manage/tools/visible-watermark-extract/](http://localhost:18080/manage/tools/visible-watermark-extract/)
+
+建議做三種測試：
+
+### A. 原圖提取
+
+1. 上傳瀏覽器直接下載的閱讀 PNG
+
+預期：
+
+- 成功提取 `reader_id|yyyymmdd`
+
+### B. 單頁截圖提取
+
+1. 在閱讀頁對一張頁圖做一般截圖
+2. 上傳到可見浮水印提取工具
+
+預期：
+
+- 成功提取 `reader_id|yyyymmdd`
+
+### C. 1 到 3 張連續畫面截圖
+
+1. 在閱讀頁讓 1 到 3 張圖連續顯示
+2. 做一張一般截圖或長截圖
+3. 上傳到可見浮水印提取工具
+
+預期：
+
+- 在目前版本下，應能成功提取 `reader_id|yyyymmdd`
+- 頁面會顯示提取階段、視窗、OCR 嘗試與耗時
+
+## 14. 密碼與防暴力破解
+
+### 讀者修改密碼
+
+1. 以閱讀者登入
+2. 進修改密碼頁
+3. 用舊密碼改成新密碼
+4. 登出再登入
+
+預期：
+
+- 新密碼可用
 - 舊密碼失效
 
-### 10.3 防暴力破解
+### 防暴力破解
 
-故意連續輸入錯誤密碼多次：
+1. 故意對同一帳號輸錯多次密碼
+2. 觀察是否進入冷卻或鎖定
 
-- 應出現冷卻或暫時鎖定
+預期：
 
-## 11. 常用指令
+- 在設定門檻後會出現限制
 
-### 查看狀態
-
-PowerShell:
-
-```powershell
-Set-Location C:\Users\j7johnny\Desktop\20260307CatchingRat
-docker compose ps
-```
-
-cmd:
-
-```cmd
-cd /d C:\Users\j7johnny\Desktop\20260307CatchingRat
-docker compose ps
-```
+## 15. 驗收完成後常用指令
 
 ### 查看 log
 
@@ -418,45 +339,3 @@ cmd:
 cd /d C:\Users\j7johnny\Desktop\20260307CatchingRat
 docker compose down
 ```
-
-## 12. 這份版本的最低驗收標準
-
-以下 8 項都通過，才算這版功能驗收完成：
-
-1. 管理者可登入 `/manage/`
-2. anti7ocr 設定頁可正常打開且分組清楚
-3. `產生示範圖片` 可成功產圖
-4. 客製字體可上傳、啟用、停用、刪除
-5. 章節發布完成後，讀者才看得到新版本
-6. 讀者可正常進入小說、章節與第一張閱讀圖
-7. 原圖可成功提取 blind watermark
-8. 提取紀錄會保留方法、耗時與過程 log
-## 13. 截圖壓測指令
-這一版另外提供了專門驗證截圖提取成功率的指令，會自動把 1 到 3 張已產出的個人化頁圖接成長圖，再做多次隨機裁切，模擬閱讀者實際截圖。
-
-PowerShell:
-
-```powershell
-Set-Location C:\Users\j7johnny\Desktop\20260307CatchingRat
-docker compose exec -T web python manage.py benchmark_watermark_extraction --reader benchreader --device desktop --date 20260309 --chapter-version-id 6 --trials-per-count 8 --max-pages 3
-```
-
-cmd:
-
-```cmd
-cd /d C:\Users\j7johnny\Desktop\20260307CatchingRat
-docker compose exec -T web python manage.py benchmark_watermark_extraction --reader benchreader --device desktop --date 20260309 --chapter-version-id 6 --trials-per-count 8 --max-pages 3
-```
-
-參數說明：
-- `--reader`：要驗證的閱讀者帳號
-- `--device`：`desktop` 或 `mobile`
-- `--date`：日快取日期，格式 `YYYYMMDD`
-- `--chapter-version-id`：指定某一個章節版本
-- `--trials-per-count`：每種頁數組合要跑幾次隨機裁切
-- `--max-pages`：最多模擬幾張連續頁面，目前建議 `3`
-
-判讀方式：
-- `1 page(s) / 2 page(s) / 3 page(s)` 代表模擬單頁、兩頁、三頁連續截圖
-- `success` 越高越好，正式驗收建議至少觀察 5 到 10 次
-- `method` 若顯示 `近期單頁...` 或 `近期連續...`，代表這次是透過來源對位成功定位到對應的個人化頁圖

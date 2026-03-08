@@ -16,7 +16,12 @@ from library.models import AntiOcrPreset, Chapter, ChapterStatus, CustomFontUplo
 from library.services.anti7ocr_config import summarize_preset
 from library.services.anti7ocr_diagnostics import generate_preview, run_diagnostics
 from library.services.publishing import publish_chapter
-from library.services.watermark_records import create_extraction_record
+from library.services.watermark_records import (
+    BLIND_EXTRACTION_KIND,
+    VISIBLE_EXTRACTION_KIND,
+    create_extraction_record,
+    get_extraction_kind_filter,
+)
 from library.tasks import run_watermark_extraction_task
 
 from .forms import (
@@ -52,7 +57,7 @@ def render_manage(request: HttpRequest, template_name: str, context: dict) -> Ht
     defaults = {
         "manage_section": "dashboard",
         "page_title": "管理後台",
-        "page_subtitle": "這裡提供日常管理、章節發布、anti7ocr 設定與浮水印工具。",
+        "page_subtitle": "在這裡管理閱讀者、小說、章節、anti7ocr 設定與各種提取工具。",
         "font_summary": {
             "total": CustomFontUpload.objects.count(),
             "active": CustomFontUpload.objects.filter(is_active=True).count(),
@@ -71,7 +76,7 @@ def setup_view(request: HttpRequest) -> HttpResponse:
     if request.method == "POST" and form.is_valid():
         user = form.save()
         login(request, user)
-        messages.success(request, "第一位管理者已建立完成，現在可以進入管理後台。")
+        messages.success(request, "第一位管理者已建立完成，現在可以開始設定小說與閱讀者。")
         return redirect("backoffice:dashboard")
 
     return render(
@@ -80,7 +85,7 @@ def setup_view(request: HttpRequest) -> HttpResponse:
         {
             "form": form,
             "page_title": "建立第一位管理者",
-            "page_subtitle": "只有第一次開站時可使用。完成後 `/setup/` 會自動關閉。",
+            "page_subtitle": "這台站點目前還沒有管理者帳號，請先完成初始化設定。",
         },
     )
 
@@ -94,11 +99,11 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     )
     context = {
         "manage_section": "dashboard",
-        "page_title": "管理首頁",
-        "page_subtitle": "建議由這裡開始：先新增閱讀者，再建立小說與章節，最後發布並檢查浮水印提取。",
+        "page_title": "管理儀表板",
+        "page_subtitle": "快速查看目前站點內容與常用操作入口。",
         "stats": [
             {"label": "閱讀者帳號", "value": User.objects.filter(role=User.Role.READER).count()},
-            {"label": "小說總數", "value": Novel.objects.count()},
+            {"label": "小說數量", "value": Novel.objects.count()},
             {"label": "已發布章節", "value": chapter_counts["published"]},
             {"label": "草稿章節", "value": chapter_counts["draft"]},
         ],
@@ -124,7 +129,7 @@ def reader_list(request: HttpRequest) -> HttpResponse:
         {
             "manage_section": "readers",
             "page_title": "閱讀者管理",
-            "page_subtitle": "建立閱讀者、重設密碼，並設定全站 / 指定小說 / 指定章節授權。",
+            "page_subtitle": "建立閱讀者、重設密碼，並設定全站、小說或章節授權。",
             "readers": readers,
         },
     )
@@ -138,10 +143,9 @@ def reader_create(request: HttpRequest) -> HttpResponse:
     access_form = ReaderAccessForm(request.POST or None, reader=blank_reader)
     if request.method == "POST" and form.is_valid() and access_form.is_valid():
         reader = form.save()
-        bound_access_form = ReaderAccessForm(request.POST, reader=reader)
-        if bound_access_form.is_valid():
-            bound_access_form.save(actor=request.user)
-        messages.success(request, f"已建立閱讀者帳號：{reader.username}")
+        access_form.reader = reader
+        access_form.save(actor=request.user)
+        messages.success(request, f"已建立閱讀者 {reader.username}")
         return redirect("backoffice:reader-update", user_id=reader.id)
 
     return render_manage(
@@ -150,7 +154,7 @@ def reader_create(request: HttpRequest) -> HttpResponse:
         {
             "manage_section": "readers",
             "page_title": "新增閱讀者",
-            "page_subtitle": "建立帳號後，可以立刻設定授權範圍。",
+            "page_subtitle": "建立新帳號，並直接設定可閱讀的範圍。",
             "account_form": form,
             "access_form": access_form,
             "reader_obj": None,
@@ -165,9 +169,9 @@ def reader_update(request: HttpRequest, user_id: int) -> HttpResponse:
     form = ReaderUpdateForm(request.POST or None, instance=reader)
     access_form = ReaderAccessForm(request.POST or None, reader=reader)
     if request.method == "POST" and form.is_valid() and access_form.is_valid():
-        reader = form.save()
+        form.save()
         access_form.save(actor=request.user)
-        messages.success(request, f"已更新閱讀者帳號：{reader.username}")
+        messages.success(request, f"已更新閱讀者 {reader.username}")
         return redirect("backoffice:reader-update", user_id=reader.id)
 
     return render_manage(
@@ -176,7 +180,7 @@ def reader_update(request: HttpRequest, user_id: int) -> HttpResponse:
         {
             "manage_section": "readers",
             "page_title": f"編輯閱讀者：{reader.username}",
-            "page_subtitle": "可在這裡重設密碼與調整授權。",
+            "page_subtitle": "可在此更新密碼、啟用狀態與閱讀授權。",
             "account_form": form,
             "access_form": access_form,
             "reader_obj": reader,
@@ -196,7 +200,7 @@ def novel_list(request: HttpRequest) -> HttpResponse:
         {
             "manage_section": "novels",
             "page_title": "小說管理",
-            "page_subtitle": "先建立小說，再進入小說頁建立章節、編輯內容與發布。",
+            "page_subtitle": "建立小說、查看章節數量，並進入章節編輯。",
             "novels": novels,
         },
     )
@@ -208,7 +212,7 @@ def novel_create(request: HttpRequest) -> HttpResponse:
     form = NovelBackofficeForm(request.POST or None, initial={"is_active": True})
     if request.method == "POST" and form.is_valid():
         novel = form.save()
-        messages.success(request, f"已建立小說：{novel.title}")
+        messages.success(request, f"已建立小說 {novel.title}")
         return redirect("backoffice:novel-detail", novel_id=novel.id)
 
     return render_manage(
@@ -217,7 +221,7 @@ def novel_create(request: HttpRequest) -> HttpResponse:
         {
             "manage_section": "novels",
             "page_title": "新增小說",
-            "page_subtitle": "小說建立完成後，就能直接新增章節。",
+            "page_subtitle": "建立小說名稱、代稱與簡介。",
             "form": form,
             "novel": None,
             "chapters": [],
@@ -231,8 +235,8 @@ def novel_detail(request: HttpRequest, novel_id: int) -> HttpResponse:
     novel = get_object_or_404(Novel, pk=novel_id)
     form = NovelBackofficeForm(request.POST or None, instance=novel)
     if request.method == "POST" and form.is_valid():
-        novel = form.save()
-        messages.success(request, f"已更新小說：{novel.title}")
+        form.save()
+        messages.success(request, f"已更新小說 {novel.title}")
         return redirect("backoffice:novel-detail", novel_id=novel.id)
 
     chapters = novel.chapters.select_related("current_version").order_by("sort_order", "id")
@@ -242,7 +246,7 @@ def novel_detail(request: HttpRequest, novel_id: int) -> HttpResponse:
         {
             "manage_section": "novels",
             "page_title": f"小說：{novel.title}",
-            "page_subtitle": "在這裡編輯小說資訊、查看章節清單，或直接建立新章節。",
+            "page_subtitle": "可直接在此查看章節排序、發布狀態與目前版本。",
             "form": form,
             "novel": novel,
             "chapters": chapters,
@@ -265,7 +269,7 @@ def _render_chapter_editor(request: HttpRequest, chapter: Chapter | None = None)
             else:
                 messages.success(
                     request,
-                    f"已完成發布：{chapter.title}（版本 v{version.version_number}）。桌機與手機基底圖都已準備完成，讀者現在才會看得到。",
+                    f"已發布章節 {chapter.title}，版本 v{version.version_number}。桌機與手機基底圖都完成後才會對閱讀者開放。",
                 )
         else:
             messages.success(request, "章節草稿已儲存。")
@@ -277,7 +281,7 @@ def _render_chapter_editor(request: HttpRequest, chapter: Chapter | None = None)
         {
             "manage_section": "novels",
             "page_title": "新增章節" if chapter is None else f"編輯章節：{chapter.title}",
-            "page_subtitle": "發布時會先產生桌機與手機兩套基底圖。只有全部完成後，讀者才會看到新版本。",
+            "page_subtitle": "貼入正文、選擇 anti7ocr 設定，並可直接儲存草稿或發布。",
             "form": form,
             "chapter": chapter,
         },
@@ -299,7 +303,7 @@ def chapter_create(request: HttpRequest) -> HttpResponse:
             {
                 "manage_section": "novels",
                 "page_title": "新增章節",
-                "page_subtitle": "先存草稿，確認 anti7ocr 設定後再正式發布。",
+                "page_subtitle": "建立草稿後，即可在同頁直接發布。",
                 "form": form,
                 "chapter": None,
             },
@@ -328,16 +332,16 @@ def chapter_publish(request: HttpRequest, chapter_id: int) -> HttpResponse:
     except Exception as exc:
         messages.error(request, f"發布失敗：{exc}")
     else:
-        messages.success(
-            request,
-            f"已完成發布：{chapter.title}（版本 v{version.version_number}）。桌機與手機基底圖都已完成。",
-        )
+        messages.success(request, f"已發布章節 {chapter.title}，版本 v{version.version_number}")
     return redirect("backoffice:novel-detail", novel_id=chapter.novel_id)
 
 
 @admin_required
 def anti_ocr_preset_list(request: HttpRequest) -> HttpResponse:
-    preset_cards = [{"preset": preset, "summary": summarize_preset(preset.as_snapshot())} for preset in AntiOcrPreset.objects.order_by("-is_default", "name")]
+    preset_cards = [
+        {"preset": preset, "summary": summarize_preset(preset.as_snapshot())}
+        for preset in AntiOcrPreset.objects.order_by("-is_default", "name")
+    ]
     fonts = CustomFontUpload.objects.order_by("name")
     return render_manage(
         request,
@@ -345,7 +349,7 @@ def anti_ocr_preset_list(request: HttpRequest) -> HttpResponse:
         {
             "manage_section": "settings",
             "page_title": "anti7ocr 設定",
-            "page_subtitle": "管理全站 anti7ocr 參數、上傳自訂字體，並用示範圖片快速確認可讀性。",
+            "page_subtitle": "管理輸出參數、上傳字體，並先用示範圖片確認效果。",
             "preset_cards": preset_cards,
             "fonts": fonts,
             "font_form": CustomFontUploadForm(),
@@ -365,10 +369,10 @@ def _render_preset_form(request: HttpRequest, preset: AntiOcrPreset | None = Non
                 device_profile=form.cleaned_data["preview_device_profile"],
                 output_prefix=f"preset-preview-{preset.id if preset else 'new'}",
             )
-            messages.success(request, "示範圖片已產生，可直接用來檢查字級與干擾強度。")
+            messages.success(request, "示範圖片已產生，可先檢查閱讀效果再決定是否儲存。")
         else:
             saved_preset = form.save()
-            messages.success(request, f"已儲存設定：{saved_preset.name}")
+            messages.success(request, f"已儲存 anti7ocr 設定：{saved_preset.name}")
             return redirect("backoffice:anti-ocr-update", preset_id=saved_preset.id)
 
     return render_manage(
@@ -377,7 +381,7 @@ def _render_preset_form(request: HttpRequest, preset: AntiOcrPreset | None = Non
         {
             "manage_section": "settings",
             "page_title": "新增 anti7ocr 設定" if preset is None else f"編輯 anti7ocr 設定：{preset.name}",
-            "page_subtitle": "先按示範圖片檢查閱讀感，再正式儲存。字體來源會自動包含系統字體與你上傳的自訂字體。",
+            "page_subtitle": "表單已依閱讀性與實際用途分組，並可先產出示範圖片再儲存。",
             "form": form,
             "preset": preset,
             "preview_result": preview_result,
@@ -405,7 +409,7 @@ def font_library(request: HttpRequest) -> HttpResponse:
     form = CustomFontUploadForm(request.POST or None, request.FILES or None, initial={"is_active": True})
     if request.method == "POST" and form.is_valid():
         font = form.save()
-        messages.success(request, f"已上傳字體：{font.name}")
+        messages.success(request, f"已上傳字體 {font.name}")
         return redirect("backoffice:font-library")
 
     return render_manage(
@@ -413,8 +417,8 @@ def font_library(request: HttpRequest) -> HttpResponse:
         "backoffice/font_library.html",
         {
             "manage_section": "settings",
-            "page_title": "字體庫",
-            "page_subtitle": "上傳後的字體會自動加入 anti7ocr 可用字體來源，示範圖與正式發布都會使用。",
+            "page_title": "字體管理",
+            "page_subtitle": "上傳可供 anti7ocr 使用的自訂字體，並控制是否啟用。",
             "form": form,
             "fonts": CustomFontUpload.objects.order_by("name"),
         },
@@ -427,7 +431,8 @@ def font_toggle(request: HttpRequest, font_id: int) -> HttpResponse:
     font = get_object_or_404(CustomFontUpload, pk=font_id)
     font.is_active = not font.is_active
     font.save(update_fields=["is_active", "updated_at"])
-    messages.success(request, f"已{'啟用' if font.is_active else '停用'}字體：{font.name}")
+    status_text = "啟用" if font.is_active else "停用"
+    messages.success(request, f"已{status_text}字體 {font.name}")
     return redirect("backoffice:font-library")
 
 
@@ -438,7 +443,7 @@ def font_delete(request: HttpRequest, font_id: int) -> HttpResponse:
     font_name = font.name
     font.font_file.delete(save=False)
     font.delete()
-    messages.success(request, f"已刪除字體：{font_name}")
+    messages.success(request, f"已刪除字體 {font_name}")
     return redirect("backoffice:font-library")
 
 
@@ -467,9 +472,72 @@ def anti7ocr_diagnostics(request: HttpRequest) -> HttpResponse:
         {
             "manage_section": "tools",
             "page_title": "anti7ocr 診斷工具",
-            "page_subtitle": "輸入一段文字後，系統會產生示範圖、跑 Tesseract OCR，並顯示 CER 與詳細 metadata。",
+            "page_subtitle": "輸入測試文字，系統會產生示範圖並跑 Tesseract OCR 與 CER 分析。",
             "form": form,
             "result": result,
+        },
+    )
+
+
+def _watermark_tool_meta(kind: str) -> dict:
+    if kind == VISIBLE_EXTRACTION_KIND:
+        return {
+            "kind": VISIBLE_EXTRACTION_KIND,
+            "title": "可見浮水印提取",
+            "subtitle": "上傳閱讀頁截圖或站內原圖，系統會做顯影與 OCR，提取 reader_id|yyyymmdd。",
+            "detail_name": "backoffice:visible-watermark-extract-detail",
+            "tool_label": "可見浮水印",
+        }
+    return {
+        "kind": BLIND_EXTRACTION_KIND,
+        "title": "Blind Watermark 提取",
+        "subtitle": "上傳站內原圖、截圖或長截圖，系統會執行 blind watermark 提取流程。",
+        "detail_name": "backoffice:watermark-extract-detail",
+        "tool_label": "blind watermark",
+    }
+
+
+def _render_watermark_tool(request: HttpRequest, *, kind: str, record_id: int | None = None) -> HttpResponse:
+    tool_meta = _watermark_tool_meta(kind)
+    form = WatermarkExtractToolForm(request.POST or None, request.FILES or None)
+    if request.method == "POST" and form.is_valid():
+        record = create_extraction_record(form.cleaned_data["image"], actor=request.user, kind=kind)
+        try:
+            run_watermark_extraction_task.delay(record.id, kind)
+        except Exception:
+            run_watermark_extraction_task(record.id, kind)
+        messages.success(request, f"已建立{tool_meta['tool_label']}提取任務 #{record.id}")
+        return redirect(tool_meta["detail_name"], record_id=record.id)
+
+    recent_records = WatermarkExtractionRecord.objects.select_related("created_by").filter(
+        get_extraction_kind_filter(kind)
+    )[:10]
+    active_record = None
+    if record_id is not None:
+        active_record = get_object_or_404(
+            WatermarkExtractionRecord.objects.select_related("created_by").filter(get_extraction_kind_filter(kind)),
+            pk=record_id,
+        )
+
+    subtitle = tool_meta["subtitle"]
+    if active_record and active_record.status in {
+        WatermarkExtractionRecord.Status.PENDING,
+        WatermarkExtractionRecord.Status.RUNNING,
+    }:
+        subtitle = "提取仍在進行中，頁面會每 2 秒自動刷新一次。"
+
+    return render_manage(
+        request,
+        "backoffice/watermark_extract.html",
+        {
+            "manage_section": "tools",
+            "page_title": tool_meta["title"] if active_record is None else f"{tool_meta['title']} #{active_record.id}",
+            "page_subtitle": subtitle,
+            "form": form if active_record is None else WatermarkExtractToolForm(),
+            "recent_records": recent_records,
+            "active_record": active_record,
+            "tool_meta": tool_meta,
+            "extractor_kind": kind,
         },
     )
 
@@ -477,47 +545,20 @@ def anti7ocr_diagnostics(request: HttpRequest) -> HttpResponse:
 @admin_required
 @require_http_methods(["GET", "POST"])
 def watermark_extract(request: HttpRequest) -> HttpResponse:
-    form = WatermarkExtractToolForm(request.POST or None, request.FILES or None)
-    if request.method == "POST" and form.is_valid():
-        record = create_extraction_record(form.cleaned_data["image"], actor=request.user)
-        try:
-            run_watermark_extraction_task.delay(record.id)
-        except Exception:
-            run_watermark_extraction_task(record.id)
-        messages.success(request, f"已建立提取任務 #{record.id}")
-        return redirect("backoffice:watermark-extract-detail", record_id=record.id)
-
-    recent_records = WatermarkExtractionRecord.objects.select_related("created_by")[:10]
-    return render_manage(
-        request,
-        "backoffice/watermark_extract.html",
-        {
-            "manage_section": "tools",
-            "page_title": "blind watermark 提取",
-            "page_subtitle": "系統會先做全圖提取，失敗後再改做大量裁切搜尋。適合原圖、單張截圖與長截圖。",
-            "form": form,
-            "recent_records": recent_records,
-            "active_record": None,
-        },
-    )
+    return _render_watermark_tool(request, kind=BLIND_EXTRACTION_KIND)
 
 
 @admin_required
 def watermark_extract_detail(request: HttpRequest, record_id: int) -> HttpResponse:
-    record = get_object_or_404(WatermarkExtractionRecord.objects.select_related("created_by"), pk=record_id)
-    recent_records = WatermarkExtractionRecord.objects.select_related("created_by")[:10]
-    subtitle = "這裡會顯示本次提取的圖片資訊、採用方法與每一步的處理紀錄。"
-    if record.status in {WatermarkExtractionRecord.Status.PENDING, WatermarkExtractionRecord.Status.RUNNING}:
-        subtitle = "提取任務仍在執行中，頁面會自動刷新以更新進度。"
-    return render_manage(
-        request,
-        "backoffice/watermark_extract.html",
-        {
-            "manage_section": "tools",
-            "page_title": f"提取紀錄 #{record.id}",
-            "page_subtitle": subtitle,
-            "form": WatermarkExtractToolForm(),
-            "recent_records": recent_records,
-            "active_record": record,
-        },
-    )
+    return _render_watermark_tool(request, kind=BLIND_EXTRACTION_KIND, record_id=record_id)
+
+
+@admin_required
+@require_http_methods(["GET", "POST"])
+def visible_watermark_extract(request: HttpRequest) -> HttpResponse:
+    return _render_watermark_tool(request, kind=VISIBLE_EXTRACTION_KIND)
+
+
+@admin_required
+def visible_watermark_extract_detail(request: HttpRequest, record_id: int) -> HttpResponse:
+    return _render_watermark_tool(request, kind=VISIBLE_EXTRACTION_KIND, record_id=record_id)

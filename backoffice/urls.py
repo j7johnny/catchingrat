@@ -29,4 +29,14 @@ urlpatterns = [
         views.watermark_extract_detail,
         name="watermark-extract-detail",
     ),
+    path(
+        "manage/tools/visible-watermark-extract/",
+        views.visible_watermark_extract,
+        name="visible-watermark-extract",
+    ),
+    path(
+        "manage/tools/visible-watermark-extract/<int:record_id>/",
+        views.visible_watermark_extract_detail,
+        name="visible-watermark-extract-detail",
+    ),
 ]
