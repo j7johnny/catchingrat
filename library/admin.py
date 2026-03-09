@@ -21,7 +21,7 @@ from library.models import (
     WatermarkExtractionRecord,
 )
 from library.services.anti7ocr_config import summarize_preset
-from library.services.publishing import publish_chapter
+from library.services.publishing import schedule_chapter_publish
 
 admin.site.site_header = "CatchingRat 管理後台"
 admin.site.site_title = "CatchingRat 管理後台"
@@ -103,7 +103,7 @@ class ChapterAdmin(admin.ModelAdmin):
     def publish_selected(self, request, queryset: QuerySet):
         for chapter in queryset:
             try:
-                publish_chapter(chapter, actor=request.user, request=request)
+                schedule_chapter_publish(chapter, actor=request.user, request=request)
             except ValueError:
                 continue
 
@@ -164,6 +164,7 @@ class WatermarkExtractionRecordAdmin(admin.ModelAdmin):
         "source_filename",
         "status",
         "is_valid",
+        "advanced_extraction",
         "parsed_reader_id",
         "parsed_yyyymmdd",
         "selected_method",
@@ -180,6 +181,7 @@ class WatermarkExtractionRecordAdmin(admin.ModelAdmin):
         "selected_method",
         "attempt_count",
         "duration_ms",
+        "advanced_extraction",
         "process_log",
         "error_message",
         "started_at",

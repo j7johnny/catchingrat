@@ -7,20 +7,29 @@ from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Q
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
 from accounts.models import User
-from library.models import AntiOcrPreset, Chapter, ChapterStatus, CustomFontUpload, Novel, WatermarkExtractionRecord
+from library.models import (
+    AntiOcrPreset,
+    Chapter,
+    ChapterPublishJob,
+    ChapterStatus,
+    CustomFontUpload,
+    Novel,
+    WatermarkExtractionRecord,
+)
 from library.services.anti7ocr_config import summarize_preset
 from library.services.anti7ocr_diagnostics import generate_preview, run_diagnostics
-from library.services.publishing import publish_chapter
+from library.services.publishing import schedule_chapter_publish
 from library.services.watermark_records import (
     BLIND_EXTRACTION_KIND,
     VISIBLE_EXTRACTION_KIND,
     create_extraction_record,
     get_extraction_kind_filter,
+    request_extraction_stop,
 )
 from library.tasks import run_watermark_extraction_task
 
@@ -239,7 +248,22 @@ def novel_detail(request: HttpRequest, novel_id: int) -> HttpResponse:
         messages.success(request, f"已更新小說 {novel.title}")
         return redirect("backoffice:novel-detail", novel_id=novel.id)
 
-    chapters = novel.chapters.select_related("current_version").order_by("sort_order", "id")
+    chapters = list(novel.chapters.select_related("current_version").order_by("sort_order", "id"))
+    chapter_ids = [chapter.id for chapter in chapters]
+    active_jobs: dict[int, ChapterPublishJob] = {}
+    if chapter_ids:
+        for job in (
+            ChapterPublishJob.objects.filter(
+                chapter_id__in=chapter_ids,
+                status__in=[ChapterPublishJob.Status.PENDING, ChapterPublishJob.Status.RUNNING],
+            )
+            .select_related("chapter_version")
+            .order_by("-created_at")
+        ):
+            active_jobs.setdefault(job.chapter_id, job)
+    for chapter in chapters:
+        chapter.publish_job = active_jobs.get(chapter.id)
+
     return render_manage(
         request,
         "backoffice/novel_form.html",
@@ -254,6 +278,40 @@ def novel_detail(request: HttpRequest, novel_id: int) -> HttpResponse:
     )
 
 
+def _latest_publish_job(chapter_id: int) -> ChapterPublishJob | None:
+    return (
+        ChapterPublishJob.objects.filter(chapter_id=chapter_id)
+        .select_related("chapter", "chapter_version")
+        .order_by("-created_at")
+        .first()
+    )
+
+
+def _serialize_publish_job(chapter: Chapter, job: ChapterPublishJob | None) -> dict:
+    if job is None:
+        return {
+            "exists": False,
+            "status": "",
+            "status_display": "",
+            "progress_percent": 0,
+            "step_label": "",
+            "error_message": "",
+            "chapter_status": chapter.status,
+            "chapter_status_display": chapter.get_status_display(),
+        }
+    return {
+        "exists": True,
+        "job_id": job.id,
+        "status": job.status,
+        "status_display": job.get_status_display(),
+        "progress_percent": int(job.progress_percent or 0),
+        "step_label": job.step_label or "",
+        "error_message": job.error_message or "",
+        "chapter_status": chapter.status,
+        "chapter_status_display": chapter.get_status_display(),
+    }
+
+
 def _render_chapter_editor(request: HttpRequest, chapter: Chapter | None = None) -> HttpResponse:
     form = ChapterBackofficeForm(request.POST or None, instance=chapter)
     if request.method == "POST" and form.is_valid():
@@ -261,20 +319,21 @@ def _render_chapter_editor(request: HttpRequest, chapter: Chapter | None = None)
         action = request.POST.get("action", "save")
         if action == "publish":
             try:
-                version = publish_chapter(chapter, actor=request.user, request=request)
+                job = schedule_chapter_publish(chapter, actor=request.user, request=request)
             except ValueError as exc:
                 messages.error(request, str(exc))
             except Exception as exc:
                 messages.error(request, f"發布失敗：{exc}")
             else:
-                messages.success(
-                    request,
-                    f"已發布章節 {chapter.title}，版本 v{version.version_number}。桌機與手機基底圖都完成後才會對閱讀者開放。",
-                )
+                if job.status in {ChapterPublishJob.Status.PENDING, ChapterPublishJob.Status.RUNNING}:
+                    messages.success(request, f"章節 {chapter.title} 已排入背景發布，基底圖完成後會自動上線。")
+                else:
+                    messages.success(request, f"章節 {chapter.title} 已完成發布。")
         else:
             messages.success(request, "章節草稿已儲存。")
         return redirect("backoffice:chapter-detail", chapter_id=chapter.id)
 
+    active_publish_job = _latest_publish_job(chapter.id) if chapter is not None else None
     return render_manage(
         request,
         "backoffice/chapter_form.html",
@@ -284,6 +343,7 @@ def _render_chapter_editor(request: HttpRequest, chapter: Chapter | None = None)
             "page_subtitle": "貼入正文、選擇 anti7ocr 設定，並可直接儲存草稿或發布。",
             "form": form,
             "chapter": chapter,
+            "active_publish_job": active_publish_job if active_publish_job and active_publish_job.is_active else None,
         },
     )
 
@@ -326,14 +386,25 @@ def chapter_detail(request: HttpRequest, chapter_id: int) -> HttpResponse:
 def chapter_publish(request: HttpRequest, chapter_id: int) -> HttpResponse:
     chapter = get_object_or_404(Chapter, pk=chapter_id)
     try:
-        version = publish_chapter(chapter, actor=request.user, request=request)
+        job = schedule_chapter_publish(chapter, actor=request.user, request=request)
     except ValueError as exc:
         messages.error(request, str(exc))
     except Exception as exc:
         messages.error(request, f"發布失敗：{exc}")
     else:
-        messages.success(request, f"已發布章節 {chapter.title}，版本 v{version.version_number}")
+        if job.status in {ChapterPublishJob.Status.PENDING, ChapterPublishJob.Status.RUNNING}:
+            messages.success(request, f"章節 {chapter.title} 已排入背景發布。")
+        else:
+            messages.success(request, f"章節 {chapter.title} 已完成發布。")
     return redirect("backoffice:novel-detail", novel_id=chapter.novel_id)
+
+
+@admin_required
+@require_http_methods(["GET"])
+def chapter_publish_status(request: HttpRequest, chapter_id: int) -> JsonResponse:
+    chapter = get_object_or_404(Chapter, pk=chapter_id)
+    payload = _serialize_publish_job(chapter, _latest_publish_job(chapter.id))
+    return JsonResponse(payload)
 
 
 @admin_required
@@ -363,11 +434,18 @@ def _render_preset_form(request: HttpRequest, preset: AntiOcrPreset | None = Non
     if request.method == "POST" and form.is_valid():
         action = request.POST.get("action", "save")
         if action == "preview":
+            preview_font_paths: list[str] | None = None
+            preview_font_id = str(form.cleaned_data.get("preview_font_id") or "").strip()
+            if preview_font_id.isdigit():
+                preview_font = CustomFontUpload.objects.filter(pk=int(preview_font_id), is_active=True).first()
+                if preview_font and preview_font.absolute_path.is_file():
+                    preview_font_paths = [str(preview_font.absolute_path)]
             preview_result = generate_preview(
                 snapshot=form.prepared_snapshot,
                 text=form.cleaned_data.get("preview_text") or "",
                 device_profile=form.cleaned_data["preview_device_profile"],
                 output_prefix=f"preset-preview-{preset.id if preset else 'new'}",
+                font_paths_override=preview_font_paths,
             )
             messages.success(request, "示範圖片已產生，可先檢查閱讀效果再決定是否儲存。")
         else:
@@ -484,8 +562,10 @@ def _watermark_tool_meta(kind: str) -> dict:
         return {
             "kind": VISIBLE_EXTRACTION_KIND,
             "title": "可見浮水印提取",
-            "subtitle": "上傳閱讀頁截圖或站內原圖，系統會做顯影與 OCR，提取 reader_id|yyyymmdd。",
+            "subtitle": "上傳閱讀頁截圖或站內原圖，系統會執行影像顯影以凸顯可見浮水印。",
             "detail_name": "backoffice:visible-watermark-extract-detail",
+            "status_name": "backoffice:visible-watermark-extract-status",
+            "stop_name": "backoffice:visible-watermark-extract-stop",
             "tool_label": "可見浮水印",
         }
     return {
@@ -493,8 +573,44 @@ def _watermark_tool_meta(kind: str) -> dict:
         "title": "Blind Watermark 提取",
         "subtitle": "上傳站內原圖、截圖或長截圖，系統會執行 blind watermark 提取流程。",
         "detail_name": "backoffice:watermark-extract-detail",
+        "status_name": "backoffice:watermark-extract-status",
+        "stop_name": "backoffice:watermark-extract-stop",
         "tool_label": "blind watermark",
     }
+
+
+def _serialize_extraction_record(record: WatermarkExtractionRecord) -> dict:
+    status = record.status
+    return {
+        "id": record.id,
+        "source_filename": record.source_filename,
+        "status": status,
+        "status_display": record.get_status_display(),
+        "is_finished": status
+        not in {
+            WatermarkExtractionRecord.Status.PENDING,
+            WatermarkExtractionRecord.Status.RUNNING,
+        },
+        "cancel_requested": bool(record.cancel_requested),
+        "image_width": int(record.image_width or 0),
+        "image_height": int(record.image_height or 0),
+        "attempt_count": int(record.attempt_count or 0),
+        "duration_ms": int(record.duration_ms or 0),
+        "selected_method": record.selected_method or "",
+        "raw_payload": record.raw_payload or "",
+        "parsed_reader_id": record.parsed_reader_id or "",
+        "parsed_yyyymmdd": record.parsed_yyyymmdd or "",
+        "is_valid": bool(record.is_valid),
+        "error_message": record.error_message or "",
+        "process_log": list(record.process_log or []),
+    }
+
+
+def _get_record_or_404(record_id: int, kind: str) -> WatermarkExtractionRecord:
+    return get_object_or_404(
+        WatermarkExtractionRecord.objects.select_related("created_by").filter(get_extraction_kind_filter(kind)),
+        pk=record_id,
+    )
 
 
 def _render_watermark_tool(request: HttpRequest, *, kind: str, record_id: int | None = None) -> HttpResponse:
@@ -514,17 +630,14 @@ def _render_watermark_tool(request: HttpRequest, *, kind: str, record_id: int | 
     )[:10]
     active_record = None
     if record_id is not None:
-        active_record = get_object_or_404(
-            WatermarkExtractionRecord.objects.select_related("created_by").filter(get_extraction_kind_filter(kind)),
-            pk=record_id,
-        )
+        active_record = _get_record_or_404(record_id, kind)
 
     subtitle = tool_meta["subtitle"]
     if active_record and active_record.status in {
         WatermarkExtractionRecord.Status.PENDING,
         WatermarkExtractionRecord.Status.RUNNING,
     }:
-        subtitle = "提取仍在進行中，頁面會每 2 秒自動刷新一次。"
+        subtitle = "提取仍在進行中，頁面會自動更新處理狀態。"
 
     return render_manage(
         request,
@@ -536,6 +649,7 @@ def _render_watermark_tool(request: HttpRequest, *, kind: str, record_id: int | 
             "form": form if active_record is None else WatermarkExtractToolForm(),
             "recent_records": recent_records,
             "active_record": active_record,
+            "active_record_json": _serialize_extraction_record(active_record) if active_record else None,
             "tool_meta": tool_meta,
             "extractor_kind": kind,
         },
@@ -554,6 +668,22 @@ def watermark_extract_detail(request: HttpRequest, record_id: int) -> HttpRespon
 
 
 @admin_required
+@require_http_methods(["GET"])
+def watermark_extract_status(request: HttpRequest, record_id: int) -> JsonResponse:
+    record = _get_record_or_404(record_id, BLIND_EXTRACTION_KIND)
+    return JsonResponse(_serialize_extraction_record(record))
+
+
+@admin_required
+@require_http_methods(["POST"])
+def watermark_extract_stop(request: HttpRequest, record_id: int) -> JsonResponse:
+    record = _get_record_or_404(record_id, BLIND_EXTRACTION_KIND)
+    request_extraction_stop(record)
+    record.refresh_from_db()
+    return JsonResponse(_serialize_extraction_record(record))
+
+
+@admin_required
 @require_http_methods(["GET", "POST"])
 def visible_watermark_extract(request: HttpRequest) -> HttpResponse:
     return _render_watermark_tool(request, kind=VISIBLE_EXTRACTION_KIND)
@@ -562,3 +692,205 @@ def visible_watermark_extract(request: HttpRequest) -> HttpResponse:
 @admin_required
 def visible_watermark_extract_detail(request: HttpRequest, record_id: int) -> HttpResponse:
     return _render_watermark_tool(request, kind=VISIBLE_EXTRACTION_KIND, record_id=record_id)
+
+
+@admin_required
+@require_http_methods(["GET"])
+def visible_watermark_extract_status(request: HttpRequest, record_id: int) -> JsonResponse:
+    record = _get_record_or_404(record_id, VISIBLE_EXTRACTION_KIND)
+    return JsonResponse(_serialize_extraction_record(record))
+
+
+@admin_required
+@require_http_methods(["POST"])
+def visible_watermark_extract_stop(request: HttpRequest, record_id: int) -> JsonResponse:
+    record = _get_record_or_404(record_id, VISIBLE_EXTRACTION_KIND)
+    request_extraction_stop(record)
+    record.refresh_from_db()
+    return JsonResponse(_serialize_extraction_record(record))
+
+
+def _watermark_tool_meta() -> dict:
+    return {
+        "title": "浮水印提取工具",
+        "subtitle": "先產生可見浮水印顯影圖，再直接嘗試 Blind Watermark 原圖提取；只有勾選進階提取時，才會繼續做額外的 Blind Watermark 裁切與進一步嘗試。",
+        "detail_name": "backoffice:watermark-extract-detail",
+        "status_name": "backoffice:watermark-extract-status",
+        "stop_name": "backoffice:watermark-extract-stop",
+        "tool_label": "浮水印提取",
+    }
+
+
+def _log_entries(record: WatermarkExtractionRecord) -> list[dict]:
+    return [entry for entry in list(record.process_log or []) if isinstance(entry, dict)]
+
+
+def _entries_for_prefix(record: WatermarkExtractionRecord, prefix: str) -> list[dict]:
+    return [entry for entry in _log_entries(record) if str(entry.get("stage", "")).startswith(prefix)]
+
+
+def _summary_entry(record: WatermarkExtractionRecord, stage_name: str) -> dict | None:
+    for entry in reversed(_log_entries(record)):
+        if entry.get("stage") == stage_name:
+            return entry
+    return None
+
+
+def _visible_preview_payload(record: WatermarkExtractionRecord) -> list[dict]:
+    previews: list[dict] = []
+    for entry in _entries_for_prefix(record, "visible_"):
+        preview_url = entry.get("preview_url")
+        if not preview_url:
+            continue
+        previews.append(
+            {
+                "label": entry.get("label") or "顯影結果",
+                "preview_url": preview_url,
+                "preview_relative_path": entry.get("preview_relative_path") or "",
+            }
+        )
+    return previews
+
+
+def _blind_result_payload(entry: dict | None) -> dict | None:
+    if entry is None:
+        return None
+    return {
+        "label": entry.get("label") or "",
+        "success": bool(entry.get("success")),
+        "duration_ms": int(entry.get("duration_ms") or 0),
+        "message": entry.get("message") or "",
+        "raw_preview": entry.get("raw_preview") or "",
+        "reader_id": entry.get("reader_id") or "",
+        "yyyymmdd": entry.get("yyyymmdd") or "",
+        "selected_method": entry.get("selected_method") or "",
+    }
+
+
+def _serialize_extraction_record(record: WatermarkExtractionRecord) -> dict:
+    status = record.status
+    return {
+        "id": record.id,
+        "source_filename": record.source_filename,
+        "status": status,
+        "status_display": record.get_status_display(),
+        "is_finished": status
+        not in {
+            WatermarkExtractionRecord.Status.PENDING,
+            WatermarkExtractionRecord.Status.RUNNING,
+        },
+        "cancel_requested": bool(record.cancel_requested),
+        "image_width": int(record.image_width or 0),
+        "image_height": int(record.image_height or 0),
+        "attempt_count": int(record.attempt_count or 0),
+        "duration_ms": int(record.duration_ms or 0),
+        "selected_method": record.selected_method or "",
+        "raw_payload": record.raw_payload or "",
+        "parsed_reader_id": record.parsed_reader_id or "",
+        "parsed_yyyymmdd": record.parsed_yyyymmdd or "",
+        "is_valid": bool(record.is_valid),
+        "error_message": record.error_message or "",
+        "advanced_extraction": bool(record.advanced_extraction),
+        "visible_previews": _visible_preview_payload(record),
+        "blind_direct": _blind_result_payload(_summary_entry(record, "blind_direct_summary")),
+        "blind_advanced": _blind_result_payload(_summary_entry(record, "blind_advanced_summary")),
+        "process_log": _log_entries(record),
+    }
+
+
+def _get_record_or_404(record_id: int) -> WatermarkExtractionRecord:
+    return get_object_or_404(WatermarkExtractionRecord.objects.select_related("created_by"), pk=record_id)
+
+
+def _render_watermark_tool(request: HttpRequest, *, record_id: int | None = None) -> HttpResponse:
+    tool_meta = _watermark_tool_meta()
+    form = WatermarkExtractToolForm(request.POST or None, request.FILES or None)
+    if request.method == "POST" and form.is_valid():
+        record = create_extraction_record(
+            form.cleaned_data["image"],
+            actor=request.user,
+            advanced_extraction=form.cleaned_data.get("advanced_extraction", False),
+        )
+        try:
+            run_watermark_extraction_task.delay(record.id)
+        except Exception:
+            run_watermark_extraction_task(record.id)
+        messages.success(request, f"已建立{tool_meta['tool_label']}任務 #{record.id}")
+        return redirect(tool_meta["detail_name"], record_id=record.id)
+
+    recent_records = WatermarkExtractionRecord.objects.select_related("created_by")[:10]
+    active_record = None
+    if record_id is not None:
+        active_record = _get_record_or_404(record_id)
+
+    subtitle = tool_meta["subtitle"]
+    if active_record and active_record.status in {
+        WatermarkExtractionRecord.Status.PENDING,
+        WatermarkExtractionRecord.Status.RUNNING,
+    }:
+        subtitle = "提取仍在進行中，頁面會自動更新處理狀態。"
+
+    return render_manage(
+        request,
+        "backoffice/watermark_extract.html",
+        {
+            "manage_section": "tools",
+            "page_title": tool_meta["title"] if active_record is None else f"{tool_meta['title']} #{active_record.id}",
+            "page_subtitle": subtitle,
+            "form": form if active_record is None else WatermarkExtractToolForm(),
+            "recent_records": recent_records,
+            "active_record": active_record,
+            "active_record_json": _serialize_extraction_record(active_record) if active_record else None,
+            "tool_meta": tool_meta,
+        },
+    )
+
+
+@admin_required
+@require_http_methods(["GET", "POST"])
+def watermark_extract(request: HttpRequest) -> HttpResponse:
+    return _render_watermark_tool(request)
+
+
+@admin_required
+def watermark_extract_detail(request: HttpRequest, record_id: int) -> HttpResponse:
+    return _render_watermark_tool(request, record_id=record_id)
+
+
+@admin_required
+@require_http_methods(["GET"])
+def watermark_extract_status(request: HttpRequest, record_id: int) -> JsonResponse:
+    record = _get_record_or_404(record_id)
+    return JsonResponse(_serialize_extraction_record(record))
+
+
+@admin_required
+@require_http_methods(["POST"])
+def watermark_extract_stop(request: HttpRequest, record_id: int) -> JsonResponse:
+    record = _get_record_or_404(record_id)
+    request_extraction_stop(record)
+    record.refresh_from_db()
+    return JsonResponse(_serialize_extraction_record(record))
+
+
+@admin_required
+@require_http_methods(["GET", "POST"])
+def visible_watermark_extract(request: HttpRequest) -> HttpResponse:
+    return redirect("backoffice:watermark-extract")
+
+
+@admin_required
+def visible_watermark_extract_detail(request: HttpRequest, record_id: int) -> HttpResponse:
+    return redirect("backoffice:watermark-extract-detail", record_id=record_id)
+
+
+@admin_required
+@require_http_methods(["GET"])
+def visible_watermark_extract_status(request: HttpRequest, record_id: int) -> JsonResponse:
+    return watermark_extract_status(request, record_id)
+
+
+@admin_required
+@require_http_methods(["POST"])
+def visible_watermark_extract_stop(request: HttpRequest, record_id: int) -> JsonResponse:
+    return watermark_extract_stop(request, record_id)

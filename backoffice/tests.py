@@ -1,5 +1,4 @@
 from pathlib import Path
-from unittest import skipUnless
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -14,7 +13,6 @@ from testsupport import (
     build_long_chinese_text,
     cleanup_temp_media_root,
     find_font_or_skip,
-    has_tesseract,
     make_temp_media_root,
 )
 
@@ -144,7 +142,7 @@ class BackofficeFlowTests(TestCase):
         self.assertEqual(chapter.status, "published")
         self.assertIsNotNone(chapter.current_version_id)
 
-    def test_backoffice_watermark_extract_tool_can_read_daily_page(self):
+    def test_backoffice_watermark_extract_tool_runs_visible_and_blind_steps(self):
         admin = self.create_admin()
         reader = User.objects.create_user(username="reader01", password="ReaderPass123!")
         novel = Novel.objects.create(title="Blind 提取測試小說", slug="extract-novel")
@@ -164,6 +162,7 @@ class BackofficeFlowTests(TestCase):
             "/manage/tools/watermark-extract/",
             {
                 "image": SimpleUploadedFile("page.png", page.absolute_path.read_bytes(), content_type="image/png"),
+                "advanced_extraction": "on",
             },
             follow=False,
         )
@@ -175,11 +174,14 @@ class BackofficeFlowTests(TestCase):
         record.refresh_from_db()
         self.assertEqual(record.status, WatermarkExtractionRecord.Status.SUCCEEDED)
         self.assertTrue(record.is_valid)
+        self.assertTrue(record.advanced_extraction)
         self.assertEqual(record.parsed_reader_id, "reader01")
         self.assertEqual(record.parsed_yyyymmdd, today.strftime("%Y%m%d"))
-        self.assertGreater(len(record.process_log), 1)
+        self.assertTrue(any(entry.get("preview_url") for entry in record.process_log if isinstance(entry, dict)))
+        self.assertTrue(
+            any(entry.get("stage") == "blind_direct_summary" for entry in record.process_log if isinstance(entry, dict))
+        )
 
-    @skipUnless(has_tesseract(), "Tesseract is required for visible watermark extraction tests.")
     def test_backoffice_visible_watermark_extract_tool_can_read_daily_page(self):
         admin = self.create_admin()
         reader = User.objects.create_user(username="reader01", password="ReaderPass123!")
@@ -211,9 +213,10 @@ class BackofficeFlowTests(TestCase):
         record.refresh_from_db()
         self.assertEqual(record.status, WatermarkExtractionRecord.Status.SUCCEEDED)
         self.assertTrue(record.is_valid)
-        self.assertEqual(record.parsed_reader_id, "reader01")
-        self.assertEqual(record.parsed_yyyymmdd, today.strftime("%Y%m%d"))
+        self.assertEqual(record.parsed_reader_id, "")
+        self.assertEqual(record.parsed_yyyymmdd, "")
         self.assertIn("visible", record.selected_method)
+        self.assertTrue(any(entry.get("preview_url") for entry in record.process_log if isinstance(entry, dict)))
 
     def test_admin_can_open_anti7ocr_diagnostics_page(self):
         admin = self.create_admin()
@@ -320,3 +323,54 @@ class BackofficeFlowTests(TestCase):
         response = self.client.get("/manage/")
 
         self.assertContains(response, "v1.0.0")
+
+
+class BackofficeFlowTests(BackofficeFlowTests):
+    def test_backoffice_visible_watermark_extract_tool_can_read_daily_page(self):
+        admin = self.create_admin()
+        self.client.force_login(admin)
+
+        response = self.client.get("/manage/tools/visible-watermark-extract/", follow=False)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/manage/tools/watermark-extract/")
+
+    def test_admin_can_preview_anti7ocr_preset_before_save(self):
+        admin = self.create_admin()
+        self.client.force_login(admin)
+        font_path = Path(self.font_path)
+        uploaded_font = CustomFontUpload.objects.create(
+            name="預覽字體",
+            font_file=SimpleUploadedFile(font_path.name, font_path.read_bytes(), content_type="font/ttf"),
+            is_active=True,
+        )
+
+        with patch("backoffice.views.generate_preview") as mocked_generate_preview:
+            mocked_generate_preview.return_value = {
+                "seed": 4321,
+                "image_url": "/media/anti7ocr_previews/example.png",
+                "relative_path": "anti7ocr_previews/example.png",
+                "font_paths": [str(uploaded_font.absolute_path)],
+            }
+            response = self.client.post(
+                "/manage/settings/anti-ocr/new/",
+                {
+                    "name": "測試設定",
+                    "is_default": "",
+                    "base_preset_name": "tw_readable",
+                    "preview_text": "這是一段示範圖片測試文字。",
+                    "preview_device_profile": "desktop",
+                    "preview_font_id": str(uploaded_font.id),
+                    "action": "preview",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "anti7ocr_previews/example.png")
+        self.assertFalse(AntiOcrPreset.objects.filter(name="測試設定").exists())
+        mocked_generate_preview.assert_called_once()
+        self.assertEqual(
+            mocked_generate_preview.call_args.kwargs["font_paths_override"],
+            [str(uploaded_font.absolute_path)],
+        )

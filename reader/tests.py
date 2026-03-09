@@ -4,8 +4,8 @@ import time
 from django.test import TestCase, override_settings
 
 from accounts.models import User
-from library.models import Chapter, Novel, ReaderChapterGrant, ReaderNovelGrant, ReaderSiteGrant
-from library.services.publishing import publish_chapter
+from library.models import Chapter, ChapterPublishJob, Novel, ReaderChapterGrant, ReaderNovelGrant, ReaderSiteGrant
+from library.services.publishing import build_chapter_version, publish_chapter
 from testsupport import build_long_chinese_text, cleanup_temp_media_root, find_font_or_skip, make_temp_media_root
 
 TEST_PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
@@ -132,3 +132,62 @@ class ReaderViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, f"/reader/chapters/{self.chapter_two.id}")
+
+    def test_reader_sees_processing_notice_when_chapter_is_republishing(self):
+        pending_version = build_chapter_version(self.chapter, actor=self.admin)
+        ChapterPublishJob.objects.create(
+            chapter=self.chapter,
+            chapter_version=pending_version,
+            status=ChapterPublishJob.Status.RUNNING,
+            progress_percent=42,
+            step_label="Rendering desktop base pages",
+            created_by=self.admin,
+        )
+        self.client.force_login(self.reader)
+
+        response = self.client.get(f"/reader/chapters/{self.chapter.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "reader/chapter_processing.html")
+        self.assertContains(response, "本章節正在背景發布")
+        self.assertContains(response, "42%")
+
+    def test_novel_detail_marks_processing_chapter_as_unavailable(self):
+        ReaderChapterGrant.objects.create(reader=self.reader, chapter=self.chapter_two, granted_by=self.admin)
+        pending_version = build_chapter_version(self.chapter, actor=self.admin)
+        ChapterPublishJob.objects.create(
+            chapter=self.chapter,
+            chapter_version=pending_version,
+            status=ChapterPublishJob.Status.PENDING,
+            progress_percent=5,
+            step_label="Queued",
+            created_by=self.admin,
+        )
+        self.client.force_login(self.reader)
+
+        response = self.client.get(f"/reader/novels/{self.novel.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "本小說目前有章節正在背景發布")
+        self.assertContains(response, "背景發布中，暫時無法閱讀")
+
+    def test_page_image_url_is_blocked_while_republishing(self):
+        self.client.force_login(self.reader)
+        chapter_response = self.client.get(f"/reader/chapters/{self.chapter.id}")
+        match = re.search(rb"/reader/pages/([^/]+)/1\.png", chapter_response.content)
+        self.assertIsNotNone(match)
+        image_path = f"/reader/pages/{match.group(1).decode('utf-8')}/1.png"
+
+        pending_version = build_chapter_version(self.chapter, actor=self.admin)
+        ChapterPublishJob.objects.create(
+            chapter=self.chapter,
+            chapter_version=pending_version,
+            status=ChapterPublishJob.Status.RUNNING,
+            progress_percent=30,
+            step_label="Rendering desktop base pages",
+            created_by=self.admin,
+        )
+
+        image_response = self.client.get(image_path)
+
+        self.assertEqual(image_response.status_code, 404)

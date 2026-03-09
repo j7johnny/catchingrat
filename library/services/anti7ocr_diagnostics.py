@@ -55,10 +55,16 @@ def generate_preview(
     device_profile: str,
     seed: int | None = None,
     output_prefix: str = "preview",
+    font_paths_override: list[str] | None = None,
 ) -> dict[str, Any]:
     normalized_text = normalize_content(text) or DEFAULT_PREVIEW_TEXT
     runtime_seed = seed if seed is not None else _diagnostic_seed(normalized_text, device_profile)
     runtime_config = build_runtime_config(snapshot, device_profile, enable_sensitive_check=False)
+    if font_paths_override:
+        runtime_config.setdefault("font", {})
+        runtime_config["font"]["paths"] = list(font_paths_override)
+        runtime_config["font"]["directories"] = []
+        runtime_config["font"]["fallback_to_default"] = True
     runtime_config["canvas"]["height"] = _estimate_height(normalized_text, runtime_config, runtime_seed)
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -80,6 +86,7 @@ def generate_preview(
         "absolute_path": str(absolute_path),
         "image_url": f"{settings.MEDIA_URL}{relative_path}",
         "metadata": result.metadata,
+        "font_paths": list(runtime_config.get("font", {}).get("paths", [])),
     }
 
 

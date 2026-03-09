@@ -12,10 +12,17 @@ from django.db.models import Max
 from django.utils import timezone
 
 from accounts.models import User
-from library.models import BasePage, Chapter, ChapterStatus, ChapterVersion, DailyPageCache, DeviceProfile
+from library.models import (
+    BasePage,
+    Chapter,
+    ChapterPublishJob,
+    ChapterStatus,
+    ChapterVersion,
+    DailyPageCache,
+    DeviceProfile,
+)
 
 from .antiocr import (
-    base_pages_need_regeneration,
     build_source_sha256,
     get_default_preset,
     render_chapter_page_images,
@@ -27,7 +34,7 @@ from .storage import delete_relative_path, ensure_parent, media_relative
 from .visible_watermark import build_visible_watermark_payload, embed_visible_watermark
 from .watermark import build_watermark_payload, embed_watermark
 
-daily_page_layout_version = "v8"
+daily_page_layout_version = "v9"
 
 
 def _maybe_enqueue(task, *args, eager_mode: str = "skip"):
@@ -51,13 +58,10 @@ def purge_old_assets_for_chapter(chapter: Chapter, keep_version_id: int) -> None
     delete_queryset_files(DailyPageCache.objects.filter(chapter_version__in=old_versions))
 
 
-def publish_chapter(chapter: Chapter, actor: User | None = None, request=None) -> ChapterVersion:
-    if not chapter.content.strip():
-        raise ValueError("章節全文不可為空，請先貼入內容再發布。")
-
+def build_chapter_version(chapter: Chapter, actor: User | None = None) -> ChapterVersion:
     preset = chapter.anti_ocr_preset or get_default_preset()
     latest_version = chapter.versions.aggregate(max_version=Max("version_number"))["max_version"] or 0
-    version = ChapterVersion.objects.create(
+    return ChapterVersion.objects.create(
         chapter=chapter,
         version_number=latest_version + 1,
         content=chapter.content,
@@ -67,14 +71,8 @@ def publish_chapter(chapter: Chapter, actor: User | None = None, request=None) -
         published_at=timezone.now(),
     )
 
-    try:
-        render_base_pages_for_version(version, DeviceProfile.DESKTOP, force=True)
-        render_base_pages_for_version(version, DeviceProfile.MOBILE, force=True)
-    except Exception:
-        delete_queryset_files(BasePage.objects.filter(chapter_version=version))
-        version.delete()
-        raise
 
+def finalize_chapter_publish(chapter: Chapter, version: ChapterVersion) -> None:
     with transaction.atomic():
         chapter.refresh_from_db()
         chapter.current_version = version
@@ -83,6 +81,38 @@ def publish_chapter(chapter: Chapter, actor: User | None = None, request=None) -
         chapter.save(update_fields=["current_version", "status", "published_at", "updated_at"])
         purge_old_assets_for_chapter(chapter, version.id)
 
+
+def cleanup_failed_version(version: ChapterVersion) -> None:
+    delete_queryset_files(BasePage.objects.filter(chapter_version=version))
+    if version.pk:
+        version.delete()
+
+
+def active_publish_job_for_chapter(chapter: Chapter) -> ChapterPublishJob | None:
+    return (
+        ChapterPublishJob.objects.filter(
+            chapter=chapter,
+            status__in=[ChapterPublishJob.Status.PENDING, ChapterPublishJob.Status.RUNNING],
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+
+def publish_chapter(chapter: Chapter, actor: User | None = None, request=None) -> ChapterVersion:
+    if not chapter.content.strip():
+        raise ValueError("章節全文不可為空，請先貼入內容再發布。")
+    version = build_chapter_version(chapter, actor=actor)
+
+    try:
+        render_base_pages_for_version(version, DeviceProfile.DESKTOP, force=True)
+        render_base_pages_for_version(version, DeviceProfile.MOBILE, force=True)
+    except Exception:
+        cleanup_failed_version(version)
+        raise
+
+    finalize_chapter_publish(chapter, version)
+
     log_event(
         "chapter_published",
         user=actor,
@@ -90,6 +120,43 @@ def publish_chapter(chapter: Chapter, actor: User | None = None, request=None) -
         details={"chapter_id": chapter.id, "chapter_version_id": version.id},
     )
     return version
+
+
+def schedule_chapter_publish(chapter: Chapter, actor: User | None = None, request=None) -> ChapterPublishJob:
+    if not chapter.content.strip():
+        raise ValueError("章節全文不可為空，請先貼入內容再發布。")
+
+    existing_job = active_publish_job_for_chapter(chapter)
+    if existing_job is not None:
+        return existing_job
+
+    version = build_chapter_version(chapter, actor=actor)
+    job = ChapterPublishJob.objects.create(
+        chapter=chapter,
+        chapter_version=version,
+        status=ChapterPublishJob.Status.PENDING,
+        progress_percent=5,
+        step_label="Queued",
+        created_by=actor,
+    )
+
+    from library.tasks import run_chapter_publish_job_task
+
+    if settings.CELERY_TASK_ALWAYS_EAGER:
+        run_chapter_publish_job_task(job.id)
+        job.refresh_from_db()
+    else:
+        async_result = run_chapter_publish_job_task.delay(job.id)
+        ChapterPublishJob.objects.filter(pk=job.pk).update(celery_task_id=async_result.id)
+        job.celery_task_id = async_result.id
+
+    log_event(
+        "chapter_publish_queued",
+        user=actor,
+        request=request,
+        details={"chapter_id": chapter.id, "chapter_version_id": version.id, "job_id": job.id},
+    )
+    return job
 
 
 def render_base_pages_for_version(chapter_version: ChapterVersion, device_profile: str, force: bool = False) -> list[BasePage]:
@@ -124,7 +191,9 @@ def ensure_base_pages(chapter_version: ChapterVersion, device_profile: str) -> l
     pages = list(
         BasePage.objects.filter(chapter_version=chapter_version, device_profile=device_profile).order_by("page_index")
     )
-    if base_pages_need_regeneration(pages, device_profile, chapter_version.preset_snapshot):
+    if not pages:
+        return render_base_pages_for_version(chapter_version, device_profile, force=True)
+    if any(not page.absolute_path.exists() for page in pages):
         return render_base_pages_for_version(chapter_version, device_profile, force=True)
     return pages
 
@@ -164,6 +233,8 @@ def build_daily_page(
     for_date: date,
     device_profile: str,
     page_index: int,
+    *,
+    base_page: BasePage | None = None,
 ) -> DailyPageCache:
     page = DailyPageCache.objects.filter(
         chapter_version=chapter_version,
@@ -176,7 +247,7 @@ def build_daily_page(
     if page and page.absolute_path.exists() and page.relative_path.startswith(expected_prefix):
         return page
 
-    base_page = ensure_base_page(chapter_version, device_profile, page_index)
+    base_page = base_page or ensure_base_page(chapter_version, device_profile, page_index)
     relative_path = daily_page_relative_path(chapter_version.id, reader.id, for_date, device_profile, page_index)
     absolute_path = ensure_parent(relative_path)
     blind_payload = build_watermark_payload(reader.reader_id, for_date)
@@ -184,18 +255,18 @@ def build_daily_page(
     file_descriptor, temp_name = tempfile.mkstemp(suffix=".png")
     temp_path = Path(temp_name)
     try:
-        embed_visible_watermark(
+        embed_watermark(
             str(base_page.absolute_path),
             str(temp_path),
-            visible_payload,
-            device_profile=device_profile,
-        )
-        embed_watermark(
-            str(temp_path),
-            str(absolute_path),
             blind_payload,
             expected_reader_id=reader.reader_id,
             expected_yyyymmdd=for_date.strftime("%Y%m%d"),
+        )
+        embed_visible_watermark(
+            str(temp_path),
+            str(absolute_path),
+            visible_payload,
+            device_profile=device_profile,
         )
     finally:
         with contextlib.suppress(OSError):
@@ -224,8 +295,18 @@ def ensure_daily_bundle(
     for_date: date | None = None,
 ) -> dict:
     for_date = for_date or timezone.localdate()
-    page_count = get_page_count(chapter_version, device_profile)
-    first_page = build_daily_page(chapter_version, reader, for_date, device_profile, 1)
+    base_pages = ensure_base_pages(chapter_version, device_profile)
+    page_count = len(base_pages)
+    if page_count < 1:
+        raise IndexError("No base pages available for chapter version.")
+    first_page = build_daily_page(
+        chapter_version,
+        reader,
+        for_date,
+        device_profile,
+        1,
+        base_page=base_pages[0],
+    )
 
     from library.tasks import build_daily_pages_task
 
@@ -254,9 +335,17 @@ def build_remaining_daily_pages(
     device_profile: str,
     start_page: int = 1,
 ) -> None:
-    page_count = get_page_count(chapter_version, device_profile)
+    base_pages = ensure_base_pages(chapter_version, device_profile)
+    page_count = len(base_pages)
     for page_index in range(start_page, page_count + 1):
-        build_daily_page(chapter_version, reader, for_date, device_profile, page_index)
+        build_daily_page(
+            chapter_version,
+            reader,
+            for_date,
+            device_profile,
+            page_index,
+            base_page=base_pages[page_index - 1],
+        )
 
 
 def cleanup_daily_cache() -> int:

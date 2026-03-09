@@ -193,6 +193,61 @@ class ChapterVersion(models.Model):
         return f"{self.chapter} v{self.version_number}"
 
 
+class ChapterPublishJob(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "等待中"
+        RUNNING = "running", "處理中"
+        SUCCEEDED = "succeeded", "成功"
+        FAILED = "failed", "失敗"
+        CANCELED = "canceled", "已取消"
+
+    chapter = models.ForeignKey(
+        Chapter,
+        on_delete=models.CASCADE,
+        related_name="publish_jobs",
+        verbose_name="章節",
+    )
+    chapter_version = models.OneToOneField(
+        ChapterVersion,
+        on_delete=models.CASCADE,
+        related_name="publish_job",
+        verbose_name="目標版本",
+    )
+    status = models.CharField("狀態", max_length=20, choices=Status.choices, default=Status.PENDING)
+    progress_percent = models.PositiveSmallIntegerField("進度(%)", default=0)
+    step_label = models.CharField("目前步驟", max_length=120, blank=True)
+    error_message = models.TextField("錯誤訊息", blank=True)
+    celery_task_id = models.CharField("Celery Task ID", max_length=100, blank=True)
+    cancel_requested = models.BooleanField("已要求取消", default=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="chapter_publish_jobs",
+        verbose_name="建立者",
+    )
+    started_at = models.DateTimeField("開始時間", null=True, blank=True)
+    finished_at = models.DateTimeField("完成時間", null=True, blank=True)
+    created_at = models.DateTimeField("建立時間", auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "章節發布工作"
+        verbose_name_plural = "章節發布工作"
+        indexes = [
+            models.Index(fields=["chapter", "status"]),
+            models.Index(fields=["status", "created_at"]),
+        ]
+
+    @property
+    def is_active(self) -> bool:
+        return self.status in {self.Status.PENDING, self.Status.RUNNING}
+
+    def __str__(self) -> str:
+        return f"{self.chapter} -> v{self.chapter_version.version_number} ({self.status})"
+
+
 class ReaderSiteGrant(models.Model):
     reader = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -384,6 +439,7 @@ class WatermarkExtractionRecord(models.Model):
         RUNNING = "running", "執行中"
         SUCCEEDED = "succeeded", "成功"
         FAILED = "failed", "失敗"
+        CANCELED = "canceled", "已取消"
 
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -402,11 +458,14 @@ class WatermarkExtractionRecord(models.Model):
     parsed_reader_id = models.CharField("解析後 reader_id", max_length=16, blank=True)
     parsed_yyyymmdd = models.CharField("解析後日期", max_length=8, blank=True)
     is_valid = models.BooleanField("提取成功", default=False)
-    selected_method = models.CharField("採用方法", max_length=120, blank=True)
+    selected_method = models.CharField("採用方法", max_length=160, blank=True)
     attempt_count = models.PositiveIntegerField("嘗試次數", default=0)
     duration_ms = models.PositiveIntegerField("耗時毫秒", default=0)
+    advanced_extraction = models.BooleanField("啟用進階 Blind 提取", default=False)
     process_log = models.JSONField("處理紀錄", default=list, blank=True)
     error_message = models.TextField("錯誤訊息", blank=True)
+    celery_task_id = models.CharField("Celery Task ID", max_length=100, blank=True)
+    cancel_requested = models.BooleanField("已要求取消", default=False)
     started_at = models.DateTimeField("開始時間", null=True, blank=True)
     finished_at = models.DateTimeField("完成時間", null=True, blank=True)
     created_at = models.DateTimeField("建立時間", auto_now_add=True)

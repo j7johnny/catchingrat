@@ -4,7 +4,7 @@ from collections import OrderedDict
 
 from django import forms
 
-from library.models import AntiOcrPreset, Chapter, Novel
+from library.models import AntiOcrPreset, Chapter, CustomFontUpload, Novel
 from library.services.anti7ocr_config import (
     PRESET_NAME_CHOICES,
     build_snapshot,
@@ -80,6 +80,11 @@ class AntiOcrPresetConfigForm(forms.ModelForm):
         label="示範裝置",
         choices=[("desktop", "桌機"), ("mobile", "手機")],
         initial="desktop",
+    )
+    preview_font_id = forms.ChoiceField(
+        label="示範字體",
+        required=False,
+        help_text="可指定一個已上傳且啟用的字體來產生示範圖；留空時會依目前啟用字體自動選擇。",
     )
 
     unicode_normalization = forms.ChoiceField(
@@ -193,7 +198,14 @@ class AntiOcrPresetConfigForm(forms.ModelForm):
         {
             "title": "基本資料",
             "description": "先決定這份設定的名稱、是否為預設，以及示範圖片要用哪段文字與哪種裝置尺寸。",
-            "fields": ("name", "is_default", "base_preset_name", "preview_text", "preview_device_profile"),
+            "fields": (
+                "name",
+                "is_default",
+                "base_preset_name",
+                "preview_text",
+                "preview_device_profile",
+                "preview_font_id",
+            ),
         },
         {
             "title": "文字保護",
@@ -304,13 +316,19 @@ class AntiOcrPresetConfigForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        active_fonts = list(CustomFontUpload.objects.filter(is_active=True).order_by("name"))
+        self.fields["preview_font_id"].choices = [("", "自動選擇（啟用字體優先）")] + [
+            (str(font.id), font.name) for font in active_fonts
+        ]
         snapshot = self._snapshot_for_initial()
         self._apply_initial_from_snapshot(snapshot)
         self.fields["preview_text"].initial = DEFAULT_PREVIEW_TEXT
+        if active_fonts and not self.is_bound:
+            self.fields["preview_font_id"].initial = str(active_fonts[0].id)
         if self.is_bound and self.data.get("action") == "preview":
             bound_data = self.data.copy()
             for field_name, field in self.fields.items():
-                if field_name in {"preview_text", "preview_device_profile"}:
+                if field_name in {"preview_text", "preview_device_profile", "preview_font_id"}:
                     continue
                 if isinstance(field.widget, (forms.CheckboxInput, forms.CheckboxSelectMultiple)):
                     continue

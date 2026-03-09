@@ -16,6 +16,11 @@ urlpatterns = [
     path("manage/chapters/new/", views.chapter_create, name="chapter-create"),
     path("manage/chapters/<int:chapter_id>/", views.chapter_detail, name="chapter-detail"),
     path("manage/chapters/<int:chapter_id>/publish/", views.chapter_publish, name="chapter-publish"),
+    path(
+        "manage/chapters/<int:chapter_id>/publish-status/",
+        views.chapter_publish_status,
+        name="chapter-publish-status",
+    ),
     path("manage/settings/anti-ocr/", views.anti_ocr_preset_list, name="anti-ocr-list"),
     path("manage/settings/anti-ocr/new/", views.anti_ocr_preset_create, name="anti-ocr-create"),
     path("manage/settings/anti-ocr/<int:preset_id>/", views.anti_ocr_preset_update, name="anti-ocr-update"),
@@ -30,6 +35,16 @@ urlpatterns = [
         name="watermark-extract-detail",
     ),
     path(
+        "manage/tools/watermark-extract/<int:record_id>/status/",
+        views.watermark_extract_status,
+        name="watermark-extract-status",
+    ),
+    path(
+        "manage/tools/watermark-extract/<int:record_id>/stop/",
+        views.watermark_extract_stop,
+        name="watermark-extract-stop",
+    ),
+    path(
         "manage/tools/visible-watermark-extract/",
         views.visible_watermark_extract,
         name="visible-watermark-extract",
@@ -38,5 +53,15 @@ urlpatterns = [
         "manage/tools/visible-watermark-extract/<int:record_id>/",
         views.visible_watermark_extract_detail,
         name="visible-watermark-extract-detail",
+    ),
+    path(
+        "manage/tools/visible-watermark-extract/<int:record_id>/status/",
+        views.visible_watermark_extract_status,
+        name="visible-watermark-extract-status",
+    ),
+    path(
+        "manage/tools/visible-watermark-extract/<int:record_id>/stop/",
+        views.visible_watermark_extract_stop,
+        name="visible-watermark-extract-stop",
     ),
 ]

@@ -5,7 +5,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 
 from accounts.models import User
-from library.models import AuditLog, Chapter, ChapterStatus, DeviceProfile, Novel
+from library.models import AuditLog, Chapter, ChapterPublishJob, ChapterStatus, DeviceProfile, Novel
 from library.services.access import (
     accessible_chapters_for_novel,
     accessible_novels_queryset,
@@ -52,6 +52,27 @@ def ensure_reader_access(user: User) -> None:
         raise PermissionDenied
 
 
+def active_publish_jobs_for_chapters(chapter_ids: list[int]) -> dict[int, ChapterPublishJob]:
+    if not chapter_ids:
+        return {}
+    jobs: dict[int, ChapterPublishJob] = {}
+    queryset = (
+        ChapterPublishJob.objects.filter(
+            chapter_id__in=chapter_ids,
+            status__in=[ChapterPublishJob.Status.PENDING, ChapterPublishJob.Status.RUNNING],
+        )
+        .select_related("chapter_version")
+        .order_by("chapter_id", "-created_at")
+    )
+    for job in queryset:
+        jobs.setdefault(job.chapter_id, job)
+    return jobs
+
+
+def active_publish_job_for_chapter(chapter_id: int) -> ChapterPublishJob | None:
+    return active_publish_jobs_for_chapters([chapter_id]).get(chapter_id)
+
+
 @login_required
 def library_index(request):
     ensure_reader_access(request.user)
@@ -67,12 +88,22 @@ def novel_detail(request, novel_id: int):
     chapters = list(accessible_chapters_for_novel(request.user, novel))
     if not chapters:
         raise Http404
+    active_jobs = active_publish_jobs_for_chapters([chapter.id for chapter in chapters])
+    chapter_entries = [
+        {
+            "chapter": chapter,
+            "publish_job": active_jobs.get(chapter.id),
+        }
+        for chapter in chapters
+    ]
     response = render(
         request,
         "reader/novel_detail.html",
         {
             "novel": novel,
-            "chapters": chapters,
+            "chapter_entries": chapter_entries,
+            "has_processing_chapters": bool(active_jobs),
+            "processing_chapter_count": len(active_jobs),
         },
     )
     return set_private_no_store(response)
@@ -90,6 +121,20 @@ def chapter_detail(request, chapter_id: int):
         raise Http404
     if chapter.current_version is None:
         raise Http404
+
+    active_publish_job = active_publish_job_for_chapter(chapter.id)
+    if active_publish_job is not None:
+        response = render(
+            request,
+            "reader/chapter_processing.html",
+            {
+                "chapter": chapter,
+                "publish_job": active_publish_job,
+                "novel_detail_url": reverse("reader:novel-detail", args=[chapter.novel_id]),
+                "library_url": reverse("reader:library"),
+            },
+        )
+        return set_private_no_store(response)
 
     device_profile = resolve_device_profile(request)
     bundle = ensure_daily_bundle(chapter.current_version, request.user, device_profile)
@@ -156,6 +201,8 @@ def reader_page_image(request, signed_key: str, page_index: int):
 
     chapter = get_accessible_chapter_by_version(request.user, version_id)
     if chapter is None or chapter.current_version_id != version_id:
+        raise Http404
+    if active_publish_job_for_chapter(chapter.id) is not None:
         raise Http404
 
     page = build_daily_page(chapter.current_version, request.user, for_date, device_profile, page_index)

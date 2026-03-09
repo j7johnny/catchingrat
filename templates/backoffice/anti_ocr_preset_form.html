@@ -67,6 +67,12 @@
                     <dt>輸出路徑</dt>
                     <dd>{{ preview_result.relative_path }}</dd>
                 </div>
+                {% if preview_result.font_paths %}
+                <div>
+                    <dt>本次示範字體</dt>
+                    <dd>{{ preview_result.font_paths|join:"、" }}</dd>
+                </div>
+                {% endif %}
             </dl>
         {% else %}
             <div class="bo-empty-state">

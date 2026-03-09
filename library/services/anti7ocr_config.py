@@ -11,6 +11,7 @@ ANTI7OCR_ENGINE_NAME = "anti7ocr"
 ANTI7OCR_ENGINE_COMMIT = "451d8ff53ac0801a42236e7d3b27c79710b948d5"
 ANTI7OCR_CONFIG_VERSION = 1
 DEFAULT_BASE_PRESET_NAME = "tw_readable"
+DEFAULT_CANVAS_BACKGROUND_COLOR = [254, 249, 241]
 PRESET_NAME_CHOICES = (
     ("tw_readable", "tw_readable"),
     ("tw_balanced", "tw_balanced"),
@@ -43,7 +44,7 @@ def build_default_shared_config() -> dict[str, Any]:
             "reverse_rotation_range": [170, 190],
         },
         "canvas": {
-            "background_color": [255, 255, 255],
+            "background_color": list(DEFAULT_CANVAS_BACKGROUND_COLOR),
             "text_color": [20, 20, 20],
             "dpi": 96,
         },
@@ -225,7 +226,10 @@ def sanitize_shared_config(shared_config: dict[str, Any] | None) -> dict[str, An
         raise ValidationError("text.reverse_rotation_range 起始值不可大於結束值。")
 
     canvas_cfg = config["canvas"]
-    canvas_cfg["background_color"] = ensure_color_triplet(canvas_cfg.get("background_color", [255, 255, 255]), "canvas.background_color")
+    canvas_cfg["background_color"] = ensure_color_triplet(
+        canvas_cfg.get("background_color", list(DEFAULT_CANVAS_BACKGROUND_COLOR)),
+        "canvas.background_color",
+    )
     canvas_cfg["text_color"] = ensure_color_triplet(canvas_cfg.get("text_color", [20, 20, 20]), "canvas.text_color")
     canvas_cfg["dpi"] = _validate_int(canvas_cfg.get("dpi", 96), "canvas.dpi", 72, 600)
 
@@ -404,6 +408,10 @@ def build_runtime_config(
     config["font"]["paths"] = list_runtime_font_paths()
     config["font"]["directories"] = []
     config["font"]["fallback_to_default"] = True
+
+    config.setdefault("canvas", {})
+    # Keep output paper tone aligned with reader UI (rgba(255,250,242,0.95) on white ~= rgb(255,250,243)).
+    config["canvas"]["background_color"] = list(DEFAULT_CANVAS_BACKGROUND_COLOR)
 
     config.setdefault("export", {})
     config["export"]["format"] = "PNG"

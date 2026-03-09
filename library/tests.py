@@ -1,10 +1,9 @@
 from datetime import timedelta
 from io import BytesIO
-from unittest import skipUnless
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from PIL import Image
 
@@ -30,7 +29,6 @@ from testsupport import (
     build_long_chinese_text,
     cleanup_temp_media_root,
     find_font_or_skip,
-    has_tesseract,
     make_temp_media_root,
 )
 
@@ -296,7 +294,6 @@ class RenderingFlowTests(TestCase):
         self.assertEqual(result["parsed"]["yyyymmdd"], today.strftime("%Y%m%d"))
         self.assertIn("source_match", {entry["stage"] for entry in result["trace"]})
 
-    @skipUnless(has_tesseract(), "Tesseract is required for visible watermark extraction tests.")
     def test_visible_watermark_extracts_from_original_daily_page(self):
         version = publish_chapter(self.chapter, actor=self.admin)
         today = timezone.localdate()
@@ -305,11 +302,9 @@ class RenderingFlowTests(TestCase):
         result = extract_visible_watermark_from_bytes(page.absolute_path.read_bytes())
 
         self.assertTrue(result["is_valid"])
-        self.assertEqual(result["parsed"]["reader_id"], "reader01")
-        self.assertEqual(result["parsed"]["yyyymmdd"], today.strftime("%Y%m%d"))
-        self.assertIn("ocr", {entry["stage"] for entry in result["trace"]})
+        self.assertIsNone(result["parsed"])
+        self.assertIn("reveal", {entry["stage"] for entry in result["trace"]})
 
-    @skipUnless(has_tesseract(), "Tesseract is required for visible watermark extraction tests.")
     def test_visible_watermark_extracts_from_stitched_crop(self):
         self._stretch_chapter_content()
         version = publish_chapter(self.chapter, actor=self.admin)
@@ -326,6 +321,72 @@ class RenderingFlowTests(TestCase):
         result = extract_visible_watermark_from_bytes(crop_bytes)
 
         self.assertTrue(result["is_valid"])
-        self.assertEqual(result["parsed"]["reader_id"], "reader01")
-        self.assertEqual(result["parsed"]["yyyymmdd"], today.strftime("%Y%m%d"))
+        self.assertIsNone(result["parsed"])
         self.assertIn("window", {entry["stage"] for entry in result["trace"]})
+
+
+class RenderingFlowTests(RenderingFlowTests):
+    def test_republish_rebuilds_assets_and_clears_old_base_and_daily_pages(self):
+        first_version = publish_chapter(self.chapter, actor=self.admin)
+        today = timezone.localdate()
+        first_base_page = first_version.base_pages.get(device_profile=DeviceProfile.DESKTOP, page_index=1)
+        first_daily_page = build_daily_page(first_version, self.reader, today, DeviceProfile.DESKTOP, 1)
+        first_base_path = first_base_page.absolute_path
+        first_daily_path = first_daily_page.absolute_path
+
+        self.chapter.content = build_long_chinese_text(paragraphs=6, repeats=8)
+        self.chapter.save(update_fields=["content", "updated_at"])
+
+        second_version = publish_chapter(self.chapter, actor=self.admin)
+
+        self.chapter.refresh_from_db()
+        self.assertEqual(self.chapter.current_version_id, second_version.id)
+        self.assertNotEqual(first_version.id, second_version.id)
+        self.assertFalse(first_base_path.exists())
+        self.assertFalse(first_daily_path.exists())
+
+        second_base_page = second_version.base_pages.get(device_profile=DeviceProfile.DESKTOP, page_index=1)
+        second_daily_page = build_daily_page(second_version, self.reader, today, DeviceProfile.DESKTOP, 1)
+        self.assertTrue(second_base_page.absolute_path.exists())
+        self.assertTrue(second_daily_page.absolute_path.exists())
+
+    def test_visible_watermark_extracts_from_stitched_crop(self):
+        self._stretch_chapter_content()
+        version = publish_chapter(self.chapter, actor=self.admin)
+        today = timezone.localdate()
+        page_one = build_daily_page(version, self.reader, today, DeviceProfile.DESKTOP, 1)
+        page_two = build_daily_page(version, self.reader, today, DeviceProfile.DESKTOP, 2)
+
+        with Image.open(page_one.absolute_path) as image_one:
+            crop_top = max(0, image_one.height - 160)
+        crop_bytes = self._build_stitched_crop_bytes(
+            [page_one.absolute_path, page_two.absolute_path],
+            crop_box=(24, crop_top, 580, crop_top + 420),
+        )
+        result = extract_visible_watermark_from_bytes(crop_bytes)
+
+        self.assertTrue(result["is_valid"])
+        self.assertIsNone(result["parsed"])
+        self.assertGreaterEqual(result["attempt_count"], 3)
+        self.assertIn("reveal", {entry["stage"] for entry in result["trace"]})
+
+
+class VisibleWatermarkFontFallbackTests(SimpleTestCase):
+    def test_text_metrics_skips_font_that_breaks_pillow(self):
+        from library.services.visible_watermark import _text_metrics
+
+        bad_font = object()
+        good_font = object()
+        with (
+            patch("library.services.visible_watermark._runtime_font_paths", return_value=["/bad.ttf", "/good.ttf"]),
+            patch("library.services.visible_watermark.ImageFont.truetype", side_effect=[bad_font, good_font]),
+            patch(
+                "library.services.visible_watermark._measure_text",
+                side_effect=[OSError("too many function definitions"), (128, 22)],
+            ),
+        ):
+            font, width, height = _text_metrics("reader01|20260310", DeviceProfile.DESKTOP)
+
+        self.assertIs(font, good_font)
+        self.assertEqual(width, 128)
+        self.assertEqual(height, 22)

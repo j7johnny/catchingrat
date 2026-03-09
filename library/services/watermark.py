@@ -26,16 +26,14 @@ crop_sampler_seed = 20260308
 max_crop_attempts = 260
 source_match_recent_days = 7
 source_match_max_recent_pages = 240
-source_match_probe_limit = 18
-source_match_top_hits = 4
-source_match_min_score = 0.72
+source_match_probe_limit = 24
+source_match_top_hits = 6
+source_match_min_score = 0.66
 source_match_metadata_score = 0.975
 source_match_short_circuit_score = 0.995
 
 watermark_embed_profiles = (
     {"name": "direct", "seed": carrier_seed, "noise_strength": 0, "grid_strength": 0},
-    {"name": "balanced", "seed": carrier_seed, "noise_strength": 4, "grid_strength": 2},
-    {"name": "strong", "seed": carrier_seed, "noise_strength": 6, "grid_strength": 4},
 )
 
 
@@ -51,6 +49,9 @@ class TemplateMatchHit:
     x: int
     y: int
     score: float
+    scale: float
+    probe_width: int
+    probe_height: int
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,10 @@ class SourceMatchCandidate:
     yyyymmdd: str
     gray_image: np.ndarray
     canvas_shape: tuple[int, int]
+
+
+class ExtractionStopped(RuntimeError):
+    """Raised when extraction is canceled by user request."""
 
 
 def build_watermark_payload(reader_id: str, for_date) -> str:
@@ -453,7 +458,7 @@ def iter_full_image_candidates(image: np.ndarray):
     for target_width in (600, 420):
         if image.shape[1] == target_width:
             continue
-        if image.shape[1] < max(int(target_width * 0.75), 220):
+        if image.shape[1] < max(int(target_width * 0.55), 180):
             continue
         yield f"原圖正規化 {target_width}px", resize_candidate(image, target_width)
 
@@ -562,7 +567,7 @@ def iter_window_variants(window: np.ndarray):
         yield "裁切補高", padded
 
     for target_width in (600, 420):
-        if window.shape[1] < max(int(target_width * 0.75), 220):
+        if window.shape[1] < max(int(target_width * 0.55), 180):
             continue
         normalized = resize_candidate(window, target_width)
         yield f"裁切正規化 {target_width}px", normalized
@@ -763,30 +768,68 @@ def build_source_match_probes(image: np.ndarray) -> list[SourceProbe]:
 
 
 def find_template_match_hits(source_gray: np.ndarray, probe_gray: np.ndarray) -> list[TemplateMatchHit]:
-    if probe_gray.shape[0] > source_gray.shape[0] or probe_gray.shape[1] > source_gray.shape[1]:
+    source_h, source_w = source_gray.shape[:2]
+    probe_h, probe_w = probe_gray.shape[:2]
+    max_scale = min(source_w / probe_w, source_h / probe_h)
+    if max_scale < 0.35:
         return []
 
-    scores = cv2.matchTemplate(source_gray, probe_gray, cv2.TM_CCOEFF_NORMED)
-    if scores.size == 0:
-        return []
+    base_scales = [1.0, 0.95, 0.9, 0.85, 0.8, 0.75, 0.67, 0.5, 1.05]
+    scales = {
+        round(scale, 3)
+        for scale in base_scales
+        if 0.35 <= scale <= max_scale + 0.001
+    }
+    scales.add(round(min(max_scale, 1.0), 3))
+    scales = sorted(scales, reverse=True)
 
-    flat_scores = scores.reshape(-1)
-    top_k = min(source_match_top_hits, flat_scores.size)
-    if top_k <= 0:
-        return []
+    raw_hits: list[TemplateMatchHit] = []
+    for scale in scales:
+        scaled_w = max(1, int(probe_w * scale))
+        scaled_h = max(1, int(probe_h * scale))
+        if scaled_w > source_w or scaled_h > source_h:
+            continue
+        if scaled_w < 80 or scaled_h < 80:
+            continue
+        if abs(scale - 1.0) < 1e-6:
+            scaled_probe = probe_gray
+        else:
+            scaled_probe = cv2.resize(probe_gray, (scaled_w, scaled_h), interpolation=cv2.INTER_AREA)
 
-    top_indices = np.argpartition(flat_scores, -top_k)[-top_k:]
-    raw_hits = []
-    for flat_index in top_indices:
-        y, x = np.unravel_index(int(flat_index), scores.shape)
-        raw_hits.append(TemplateMatchHit(x=int(x), y=int(y), score=float(scores[y, x])))
+        scores = cv2.matchTemplate(source_gray, scaled_probe, cv2.TM_CCOEFF_NORMED)
+        if scores.size == 0:
+            continue
+
+        flat_scores = scores.reshape(-1)
+        top_k = min(source_match_top_hits, flat_scores.size)
+        if top_k <= 0:
+            continue
+        top_indices = np.argpartition(flat_scores, -top_k)[-top_k:]
+        for flat_index in top_indices:
+            y, x = np.unravel_index(int(flat_index), scores.shape)
+            raw_hits.append(
+                TemplateMatchHit(
+                    x=int(x),
+                    y=int(y),
+                    score=float(scores[y, x]),
+                    scale=float(scale),
+                    probe_width=int(scaled_w),
+                    probe_height=int(scaled_h),
+                )
+            )
 
     hits: list[TemplateMatchHit] = []
     for hit in sorted(raw_hits, key=lambda item: item.score, reverse=True):
-        if any(abs(hit.x - existing.x) <= 4 and abs(hit.y - existing.y) <= 4 for existing in hits):
+        if any(
+            abs(hit.x - existing.x) <= 6
+            and abs(hit.y - existing.y) <= 6
+            and abs(hit.probe_width - existing.probe_width) <= 8
+            and abs(hit.probe_height - existing.probe_height) <= 8
+            for existing in hits
+        ):
             continue
         hits.append(hit)
-    return hits
+    return hits[: source_match_top_hits * 3]
 
 
 def build_local_offsets(radius: int = 1) -> list[tuple[int, int]]:
@@ -887,6 +930,7 @@ def extract_watermark_from_bytes(
     expected_reader_ids: list[str] | None = None,
     expected_dates: list[str] | None = None,
     progress_callback: Callable[[dict], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict:
     np_buffer = np.frombuffer(file_bytes, dtype=np.uint8)
     image = cv2.imdecode(np_buffer, cv2.IMREAD_COLOR)
@@ -929,6 +973,10 @@ def extract_watermark_from_bytes(
     parsed_candidates: list[dict] = []
     attempt_count = 0
 
+    def assert_not_stopped() -> None:
+        if should_stop and should_stop():
+            raise ExtractionStopped("Extraction canceled by user.")
+
     def add_trace(entry: dict) -> None:
         trace.append(entry)
         if progress_callback and (
@@ -940,6 +988,7 @@ def extract_watermark_from_bytes(
             progress_callback(entry)
 
     for label, candidate in iter_full_image_candidates(image):
+        assert_not_stopped()
         attempt_count += 1
         raw, parsed, attempt_trace = run_candidate_extraction(candidate, stage="full_image", label=label, context=context)
         raw_candidates.append(raw)
@@ -978,6 +1027,7 @@ def extract_watermark_from_bytes(
         )
 
     if allow_crops:
+        assert_not_stopped()
         source_candidates = build_source_match_candidates(context)
         probes = build_source_match_probes(image)
         add_trace(
@@ -997,7 +1047,9 @@ def extract_watermark_from_bytes(
         source_metadata_votes: list[dict] = []
         local_offsets = build_local_offsets(radius=1)
         for candidate in source_candidates:
+            assert_not_stopped()
             for probe in probes:
+                assert_not_stopped()
                 if probe.gray_image.shape[0] > candidate.gray_image.shape[0] or probe.gray_image.shape[1] > candidate.gray_image.shape[1]:
                     continue
                 hits = find_template_match_hits(candidate.gray_image, probe.gray_image)
@@ -1047,11 +1099,23 @@ def extract_watermark_from_bytes(
                         }
                     )
                 for hit in hits:
+                    assert_not_stopped()
                     if hit.score < source_match_min_score:
                         continue
                     for dx, dy in local_offsets:
+                        assert_not_stopped()
+                        probe_color = probe.color_image
+                        if (
+                            probe_color.shape[1] != hit.probe_width
+                            or probe_color.shape[0] != hit.probe_height
+                        ):
+                            probe_color = cv2.resize(
+                                probe_color,
+                                (hit.probe_width, hit.probe_height),
+                                interpolation=cv2.INTER_LINEAR,
+                            )
                         recovered_canvas = recover_probe_canvas(
-                            probe.color_image,
+                            probe_color,
                             x=hit.x + dx,
                             y=hit.y + dy,
                             canvas_shape=candidate.canvas_shape,
@@ -1148,6 +1212,7 @@ def extract_watermark_from_bytes(
         )
         for iterator in crop_iterators:
             for label, candidate in iterator:
+                assert_not_stopped()
                 attempt_count += 1
                 raw, parsed, attempt_trace = run_candidate_extraction(candidate, stage="cropped", label=label, context=context)
                 raw_candidates.append(raw)
@@ -1231,6 +1296,7 @@ def extract_watermark_from_path(
     expected_reader_ids: list[str] | None = None,
     expected_dates: list[str] | None = None,
     progress_callback: Callable[[dict], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict:
     with open(image_path, "rb") as image_file:
         return extract_watermark_from_bytes(
@@ -1239,6 +1305,7 @@ def extract_watermark_from_path(
             expected_reader_ids=expected_reader_ids,
             expected_dates=expected_dates,
             progress_callback=progress_callback,
+            should_stop=should_stop,
         )
 
 
@@ -1249,6 +1316,7 @@ def extract_watermark_detailed(
     expected_reader_ids: list[str] | None = None,
     expected_dates: list[str] | None = None,
     progress_callback: Callable[[dict], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict:
     if hasattr(uploaded_file, "seek"):
         uploaded_file.seek(0)
@@ -1259,6 +1327,7 @@ def extract_watermark_detailed(
         expected_reader_ids=expected_reader_ids,
         expected_dates=expected_dates,
         progress_callback=progress_callback,
+        should_stop=should_stop,
     )
 
 
@@ -1315,7 +1384,7 @@ def embed_watermark(
             noise_strength=profile["noise_strength"],
             grid_strength=profile["grid_strength"],
         )
-        for extra_height in (0, 64, 128, 256):
+        for extra_height in (0, 64, 128):
             watermark = get_watermark_client()
             watermark.read_img(img=pad_carrier_image(carrier, extra_height=extra_height))
             watermark.read_wm(payload_bits, mode="bit")
@@ -1360,6 +1429,7 @@ def embed_watermark(
                     "verification_trace": verification_trace,
                     "verification_result": meta,
                 }
+            break
 
     if last_error is not None and last_meta is None:
         raise last_error
@@ -1367,7 +1437,83 @@ def embed_watermark(
     return {
         "verified": False,
         "profile_name": watermark_embed_profiles[-1]["name"],
-        "extra_height": 256,
+        "extra_height": 128,
         "verification_trace": verification_trace,
         "verification_result": last_meta,
+    }
+
+
+def embed_watermark(
+    input_path: str,
+    output_path: str,
+    payload: str,
+    *,
+    expected_reader_id: str | None = None,
+    expected_yyyymmdd: str | None = None,
+) -> dict:
+    payload_bits = payload_to_bits(payload)
+    verification_trace = []
+    last_error = None
+
+    for profile in watermark_embed_profiles:
+        carrier = build_carrier_image(
+            input_path,
+            seed=profile["seed"],
+            noise_strength=profile["noise_strength"],
+            grid_strength=profile["grid_strength"],
+        )
+        for extra_height in (0, 64, 128):
+            watermark = get_watermark_client()
+            watermark.read_img(img=pad_carrier_image(carrier, extra_height=extra_height))
+            watermark.read_wm(payload_bits, mode="bit")
+            try:
+                watermark.embed(filename=output_path)
+            except AssertionError as exc:
+                last_error = exc
+                verification_trace.append(
+                    {
+                        "profile": profile["name"],
+                        "extra_height": extra_height,
+                        "verified": False,
+                        "message": f"embed failed: {exc}",
+                    }
+                )
+                continue
+
+            verification_trace.append(
+                {
+                    "profile": profile["name"],
+                    "extra_height": extra_height,
+                    "verified": True,
+                    "message": "embed completed",
+                }
+            )
+            return {
+                "verified": True,
+                "profile_name": profile["name"],
+                "extra_height": extra_height,
+                "verification_trace": verification_trace,
+                "verification_result": {
+                    "parsed": {
+                        "reader_id": expected_reader_id or "",
+                        "yyyymmdd": expected_yyyymmdd or "",
+                    },
+                    "selected_method": "embed-only",
+                    "is_valid": True,
+                },
+            }
+
+    if last_error is not None:
+        raise last_error
+
+    return {
+        "verified": False,
+        "profile_name": watermark_embed_profiles[-1]["name"],
+        "extra_height": 128,
+        "verification_trace": verification_trace,
+        "verification_result": {
+            "parsed": None,
+            "selected_method": "",
+            "is_valid": False,
+        },
     }

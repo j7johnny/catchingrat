@@ -247,7 +247,12 @@ class AntiOcrPresetSimpleForm(AntiOcrPresetConfigForm):
 class WatermarkExtractToolForm(forms.Form):
     image = forms.ImageField(
         label="上傳圖片",
-        help_text="支援站內原圖、單張截圖或長截圖。系統會先做全圖提取，失敗時再做大量區塊裁切。",
+        help_text="支援站內原圖、單張截圖或長截圖。系統會先產生可見浮水印顯影圖，並直接嘗試 Blind Watermark 原圖提取。",
+    )
+    advanced_extraction = forms.BooleanField(
+        label="啟用進階 Blind 提取",
+        required=False,
+        help_text="只有在你要額外嘗試裁切、來源比對等耗時流程時才需要勾選。",
     )
 
 
@@ -294,7 +299,7 @@ class CustomFontUploadForm(forms.ModelForm):
         }
         help_texts = {
             "name": "建議填入管理者看得懂的名稱，例如「思源黑體粗體」。",
-            "font_file": "支援 ttf、otf、ttc、otc。上傳後會自動加入 anti7ocr 可用字體來源。",
+            "font_file": "支援 ttf、otf、ttc、otc。anti7ocr 會依字元逐一找可用字體；若上傳字體缺字，系統會回退到其他可用字體，因此同一張圖可能混用多套字體。",
         }
 
     def clean_font_file(self):
